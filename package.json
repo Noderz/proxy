@@ -1,0 +1,6 @@
+{
+	"main": "server.js",
+	"dependencies": {
+		"sys-nodehttp": "^1.2.3"
+	}
+}
