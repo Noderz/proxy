@@ -102,7 +102,7 @@ var rewriter = require('./rewrite.js'),
 			apply: pm.state_handler,
 		});
 		
-		win.navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
+		// win.navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
 		
 		// Reflect.apply(target, that, [ rw.url(url, { origin: location, base: pm.url }), options ])
 		win.ServiceWorkerContainer.prototype.register = new Proxy(win.ServiceWorkerContainer.prototype.register, {
@@ -199,9 +199,9 @@ var rewriter = require('./rewrite.js'),
 				}, attr, pm.rw_data());
 			},
 			getAttribute(attr){
-				var val = Reflect.apply(org.getAttribute.value, this, [ attr ]), un = rw.unurl(val, { origin: global.location });
+				var val = Reflect.apply(org.getAttribute.value, this, [ attr ]);
 				
-				return rw.attr.url[1].includes(attr) && un ? un.href : val;
+				return rw.attr.url[1].includes(attr) ? rw.unurl(val, { origin: global.location }) : val;
 			},
 			setAttributeNS(namespace, attr, val){
 				return rw.attr.del[1].includes(attr) ? true : Reflect.apply(org.setAttributeNS.value, this, [ namespace, attr, rw.attr.url[1].includes(attr) ? rw.url(val, { origin: location, base: pm.url }) : val ]);

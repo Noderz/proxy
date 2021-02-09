@@ -161,7 +161,7 @@ module.exports = class {
 				prw_ind: /\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g,
 				prw_ins: /\/\*pmrwins(\d+)\*\//g,
 				window_assignment: /(?<![a-z])window(?![a-z])\s*?=(?!=)this/gi,
-				call_this: /(?<![a-zA-Z_\d'"$])this(?![a-zA-Z_\d'":])/g,
+				call_this: /(?<![a-zA-Z_\d'"$])this(?![a-zA-Z_\d'"$])/g,
 				construct_this: /new pm_this\(this\)/g,
 				// hooking function is more practical but cant do
 				eval: /(?<![a-zA-Z0-9_$.,])(?:window\.|this)?eval(?![a-zA-Z0-9_$])/g,
@@ -821,7 +821,11 @@ module.exports = class {
 				case'sec-websocket-key': break;
 				case'origin':
 					
-					out[header] = data.url.origin;
+					var url;
+
+					if(data.url.orig)url = this.valid_url(this.config.codec.decode(data.url.orig.searchParams.get('ref'), data));
+					
+					out[header] = out.Origin = url ? url.origin : data.url.origin;
 					
 					break;
 				default:
@@ -839,14 +843,6 @@ module.exports = class {
 		delete out['cache-control'];
 		
 		out.host = data.url.host;
-		
-		if(out.origin){
-			var url;
-			
-			if(data.url.orig)url = this.valid_url(this.config.codec.decode(data.url.orig.searchParams.get('ref'), data));
-			
-			out.origin = out.Origin = url ? url.origin : data.url.origin
-		}else out[header] = data.url.origin;
 		
 		return out;
 	}/*server_only-->*/
