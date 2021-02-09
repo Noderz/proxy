@@ -67,7 +67,9 @@ module.exports = class {
 					failure = false,
 					timeout = setTimeout(() => !res.resp.sent_body && (failure = true, res.cgi_status(500, 'Timeout')), this.config.timeout);
 				
-				if(!url)return res.redirect('/');
+				if(!url || !this.http_protocols.includes(url.protocol))return res.redirect('/');
+				
+				// if(!url.orig)return console.trace(url);
 				
 				dns.lookup(url.hostname, (err, ip) => {
 					if(err)return res.cgi_status(400, err);
@@ -114,9 +116,14 @@ module.exports = class {
 				
 				wss.on('connection', (cli, req) => {
 					var req_url = new this.URL(req.url, new URL('wss://' + req.headers.host)),
-						url = this.unurl(req_url),
+						url = this.unurl(req_url);
+					
+					
+					if(url.href.includes('studyflow'))return cli.close();
+					
+					var headers = this.headers_encode(req.headers, { url: url, origin: req_url, base: url }),
 						srv = new ws(url, {
-							headers: this.headers_encode(req.headers, { url: url, origin: req_url, base: url }),
+							headers: headers,
 							agent: ['wss:', 'https:'].includes(url.protocol) ? this.config.https_agent : this.config.http_agent,
 						}),
 						time = 8000,
@@ -124,7 +131,7 @@ module.exports = class {
 						interval = setInterval(() => cli.send('srv-alive'), time / 2),
 						queue = [];
 					
-					srv.on('error', err => console.error(url.href, err) + cli.close());
+					srv.on('error', err => console.error(headers, url.href, err) + cli.close());
 					
 					cli.on('message', data => (clearTimeout(timeout), timeout = setTimeout(() => srv.close(), time), data != 'srv-alive' && (srv.readyState && srv.send(data) || queue.push(data))));
 					
@@ -202,6 +209,8 @@ module.exports = class {
 		this.attr_ent = Object.entries(this.attr);
 		
 		this.protocols = [ 'http:', 'https:', 'ws:', 'wss:' ];
+		
+		this.http_protocols = [ 'http:', 'https:' ];
 		
 		/*<--server_only*/if(!module.browser){
 			var bundler = new _bundler([
@@ -699,8 +708,11 @@ module.exports = class {
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
 		
-		var url = new this.URL(value, data.base),
-			out = url.href,
+		var url = this.valid_url(value, data.base);
+		
+		if(!url)return console.log(value), console.log(data.base), value;
+		
+		var out = url.href,
 			query = new URLSearchParams();
 		
 		if(url.pathname.match(this.regex.url.parsed) && url.pathname.startsWith(this.config.prefix))return value;
@@ -739,14 +751,12 @@ module.exports = class {
 			}
 		}
 		
-		if(!url.searchParams.has('url'))return url;
+		if(!url.searchParams.has('url'))return url.orig = url, url;
 		
 		var out = this.valid_url(this.config.codec.decode(url.searchParams.get('url'), data));
 		
-		if(url){
-			if(osearch)out.search = osearch;
-			out.orig = url;
-		}
+		if(out && osearch)out.search = osearch;
+		if(out)out.orig = url;
 		
 		return out;
 	}
@@ -816,7 +826,7 @@ module.exports = class {
 					break;
 				default:
 					
-					out[header] = val;
+					if(!header.match(this.regex.skip_header))out[header] = val;
 					
 					break;
 			}
