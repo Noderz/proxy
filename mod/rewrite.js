@@ -8,26 +8,7 @@ var fs = require('fs'),
 	https = require('https'),
 	ws = require(path.join(__dirname, 'ws.js')),
 	jsdom = require(path.join(__dirname, 'jsdom.js')).JSDOM,
-	terser = require(path.join(__dirname, 'terser.js')),
-	_bundler = class {
-		constructor(modules, wrapper = [ '', '' ]){
-			this.modules = modules;
-			this.path = globalThis.fetch ? null : require('path');
-			this.wrapper = wrapper;
-		}
-		wrap(str){
-			return JSON.stringify([ str ]).slice(1, -1);
-		}
-		resolve_contents(path){
-			return new Promise((resolve, reject) => globalThis.fetch ? fetch(path).then(res => res.text()).then(resolve).catch(reject) : fs.promises.readFile(path, 'utf8').then(resolve).catch(reject));
-		}
-		relative_path(path){
-			return this.path ? this.path.relative(__dirname, path) : path;
-		}
-		run(){
-			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f,u)=>{f=l[new URL(n,e).pathname];if(!f)throw new TypeError("Cannot find module \'"+n+"\'");!f.e&&f.apply((f.e={}),[{browser:!0,get exports(){return f.e},set exports(v){return f.e=v}},f.e,i(h+f.name),new(_=>_).constructor("return this")()]);return f.e},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
-		}
-	};
+	terser = require(path.join(__dirname, 'terser.js'));
 /*server_only-->*/
 
 var URL = require('./url.js');
@@ -59,7 +40,7 @@ module.exports = class {
 			this.config.server_ssl = this.config.server.ssl;
 			
 			this.config.server.use(this.config.prefix + '*', (req, res) => {
-				if(req.url.searchParams.has('html'))return res.send(this.preload[0] || '');
+				if(req.url.searchParams.has('html'))return res.contentType('application/javascript').send(this.preload[0] || '');
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 				
 				var url = this.unurl(req.url),
@@ -69,45 +50,60 @@ module.exports = class {
 				
 				if(!url || !this.http_protocols.includes(url.protocol))return res.redirect('/');
 				
-				// if(!url.orig)return console.trace(url);
-				
 				dns.lookup(url.hostname, (err, ip) => {
 					if(err)return res.cgi_status(400, err);
 					
-					if(ip.match(this.regex.ip))return res.cgi_status(403, 'Forbidden IP');
+					if(ip.match(this.regex.url.ip))return res.cgi_status(403, 'Forbidden IP');
 					
-					(url.protocol == 'http:' ? http : https).request({
-						agent: url.protocol == 'http:' ? this.config.http_agent : this.config.https_agent,
-						servername: url.hostname,
-						hostname: ip,
-						path: url.fullpath,
-						port: url.port,
-						protocol: url.protocol,
-						localAddress: this.config.interface,
-						headers: this.headers_encode(req.headers, data),
-						method: req.method,
-					}, resp => this.decompress(req, resp, body => {
-						var dest = req.headers['sec-fetch-dest'],
-							content_type = (resp.headers['content-type'] || '').split(';')[0],
-							type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : url.orig.searchParams.has('type') ? url.orig.searchParams.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
-							dec_headers = this.headers_decode(resp.headers, data);
-						
-						res.status(resp.statusCode == 502 ? 400 : resp.statusCode);
-						
-						for(var name in dec_headers)res.set(name, dec_headers[name]);
-						
+					try{
+						(url.protocol == 'http:' ? http : https).request({
+							agent: url.protocol == 'http:' ? this.config.http_agent : this.config.https_agent,
+							servername: url.hostname,
+							hostname: ip,
+							path: url.fullpath,
+							port: url.port,
+							protocol: url.protocol,
+							localAddress: this.config.interface,
+							headers: this.headers_encode(req.headers, data),
+							method: req.method,
+						}, resp => this.decompress(req, resp, body => {
+							var dest = req.headers['sec-fetch-dest'],
+								decoded = this.decode_params(req.url),
+								content_type = (resp.headers['content-type'] || '').split(';')[0],
+								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
+								dec_headers = this.headers_decode(resp.headers, data);
+							
+							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
+							
+							for(var name in dec_headers)res.set(name, dec_headers[name]);
+							
+							clearTimeout(timeout);
+							
+							if(failure)return;
+							
+							try{
+								res.send(decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body);
+							}catch(err){
+								console.error(err);
+								
+								res.cgi_status(400, err);
+							}
+						})).on('error', err => {
+							clearTimeout(timeout);
+							
+							if(failure || res.resp.sent_body)return;
+							
+							res.cgi_status(400, err);
+						}).end(req.raw_body);
+					}catch(err){
 						clearTimeout(timeout);
 						
-						if(failure)return;
+						if(failure || res.resp.sent_body)return;
 						
-						res.send(url.orig.searchParams.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body);
-					})).on('error', err => {
-						clearTimeout(timeout);
-						
-						if(failure)return;
+						console.error('runtime error:', err);
 						
 						res.cgi_status(400, err);
-					}).end(req.raw_body);
+					}
 				});
 			});
 			
@@ -117,7 +113,6 @@ module.exports = class {
 				wss.on('connection', (cli, req) => {
 					var req_url = new this.URL(req.url, new URL('wss://' + req.headers.host)),
 						url = this.unurl(req_url);
-					
 					
 					if(url.href.includes('studyflow'))return cli.close();
 					
@@ -131,7 +126,7 @@ module.exports = class {
 						interval = setInterval(() => cli.send('srv-alive'), time / 2),
 						queue = [];
 					
-					srv.on('error', err => console.error(headers, req.headers, url.href, err) + cli.close());
+					srv.on('error', err => console.error(headers, url.href, util.format(err)) + cli.close());
 					
 					cli.on('message', data => (clearTimeout(timeout), timeout = setTimeout(() => srv.close(), time), data != 'srv-alive' && (srv.readyState && srv.send(data) || queue.push(data))));
 					
@@ -158,17 +153,20 @@ module.exports = class {
 		
 		this.regex = {
 			js: {
+				comment: /\/{2}/g,
 				prw_ind: /\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g,
 				prw_ins: /\/\*pmrwins(\d+)\*\//g,
 				window_assignment: /(?<![a-z])window(?![a-z])\s*?=(?!=)this/gi,
-				call_this: /(?<![a-zA-Z_\d'"$])this(?![a-zA-Z_\d'"$])/g,
+				call_this: /(\?\s*?)this(\s*?:)|()()(?<![a-zA-Z_\d'"$])this(?![:a-zA-Z_\d'"$])/g,
 				construct_this: /new pm_this\(this\)/g,
 				// hooking function is more practical but cant do
 				eval: /(?<![a-zA-Z0-9_$.,])(?:window\.|this)?eval(?![a-zA-Z0-9_$])/g,
-				import_exp: /(?<!['"])(import\s+[{"'`*](?!\*)[\s\S]*?from\s*?(["']))([\s\S]*?)(\2;)/g,
+				// import_exp: /(?<!['"])(import\s+[{"'`*](?!\*)[\s\S]*?from\s*?(["']))([\s\S]*?)(\2;)/g,
 				// work on getting import() function through
 				// (match, start, quote, url, end) 
-				export_exp: /export\s*?\{[\s\S]*?;/g,
+				// export_exp: /export\s*?\{[\s\S]*?;/g,
+				server_only: /\/\*<--server_only\*\/[\s\S]*?\/\*server_only-->\*\//g,
+				sourceurl: /#\s*?sourceURL/gi,
 			},
 			css: {
 				url: /(?<![a-z])(url\s*?\(("|'|))([\s\S]*?)\2\)/gi,
@@ -182,11 +180,11 @@ module.exports = class {
 				proto: /^([^\/]+:)/,
 				host: /(:\/+)_(.*?)_/,
 				parsed: /^\/\w+-/,
+				ip: /^192\.168\.|^172\.16\.|^10\.0\.|^127\.0/,
+				whitespace: /\s+/g,
 			},
 			skip_header: /(?:^sec-websocket-key|^cdn-loop|^cf-(request|connect|ip|visitor|ray)|^real|^forwarded-|^x-(real|forwarded|frame)|^strict-transport|content-(security|encoding|length)|transfer-encoding|access-control|sourcemap|trailer)/i,
-			sourcemap: /sourceMappingURL/gi,
-			server_only: /\/\*<--server_only\*\/[\s\S]*?\/\*server_only-->\*\//g,
-			ip: /^192\.168\.|^172\.16\.|^10\.0\.|^127\.0/,
+			sourcemap: /#\s*?sourceMappingURL/gi,
 		};
 		
 		this.mime = {
@@ -213,7 +211,27 @@ module.exports = class {
 		this.http_protocols = [ 'http:', 'https:' ];
 		
 		/*<--server_only*/if(!module.browser){
-			var bundler = new _bundler([
+			this._bundler = class {
+				constructor(modules, wrapper = [ '', '' ]){
+					this.modules = modules;
+					this.path = globalThis.fetch ? null : require('path');
+					this.wrapper = wrapper;
+				}
+				wrap(str){
+					return JSON.stringify([ str ]).slice(1, -1);
+				}
+				resolve_contents(path){
+					return new Promise((resolve, reject) => globalThis.fetch ? fetch(path).then(res => res.text()).then(resolve).catch(reject) : fs.promises.readFile(path, 'utf8').then(resolve).catch(reject));
+				}
+				relative_path(path){
+					return this.path ? this.path.relative(__dirname, path) : path;
+				}
+				run(){
+					return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f,u)=>{f=l[new URL(n,e).pathname];if(!f)throw new TypeError("Cannot find module \'"+n+"\'");!f.e&&f.apply((f.e={}),[{browser:!0,get exports(){return f.e},set exports(v){return f.e=v}},f.e,i(h+f.name),new(_=>_).constructor("return this")()]);return f.e},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
+				}
+			};
+			
+			var bundler = new this._bundler([
 					path.join(__dirname, 'html.js'),
 					path.join(__dirname, 'url.js'),
 					__filename,
@@ -226,23 +244,21 @@ module.exports = class {
 				
 				if(this.preload[1] == times)return;
 				
-				var ran = await bundler.run().then(code => code.replace(this.regex.server_only, '')),
+				var ran = await bundler.run().then(code => code.replace(this.regex.js.server_only, '')),
 					merged = 'document.currentScript.remove();window.__pm_init__=(rewrite_conf,prw)=>{' + ran + 'require("./html.js")};window.__pm_init__(' + this.str_conf() + ')';
-				
-				console.log('bundle updated');
 				
 				this.preload = [ await terser.minify(merged, {
 					compress: {
 						toplevel: true,
 						drop_debugger: false,
 					},
-				}).then(data => data.code).catch(console.error), times ];
+				}).then(data => data.code + '\n//# sourceURL=RW-HTML').catch(console.error), times ];
 			};
 			
-			new _bundler([
+			new this._bundler([
 				path.join(__dirname, 'url.js'),
 				__filename,
-			]).run().then(code => terser.minify(code.replace(this.regex.server_only, ''))).then(data => {
+			]).run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''))).then(data => {
 				this.prw = data.code + 'return require("./rewrite.js")';
 			});
 			
@@ -255,6 +271,23 @@ module.exports = class {
 			this.glm = this.config.glm;
 			this.preload = [ 'alert("how!")', Date.now() ];
 		}
+	}
+	decode_params(url){
+		var osearch,
+			start = this.config.prefix.length,
+			size = url.pathname.substr(start, url.pathname.indexOf('-', start + 1) - start),
+			start2 = start + size.length + 1;
+		
+		try{
+			return new URLSearchParams(decodeURIComponent(url.pathname.substr(start2, start2 + parseInt(size, 16))));
+		}catch(err){
+			return console.error(err), url.searchParams;
+		}
+	}
+	encode_params(params){
+		var str = params.toString();
+		
+		return str.length.toString(16) + '-' + str;
 	}
 	decompress(req, res, callback){
 		var chunks = [];
@@ -274,12 +307,15 @@ module.exports = class {
 				
 				break;
 			case'br':
-				res = res.pipe(zlib.createBrotliDecompress());
+				res = res.pipe(zlib.createBrotliDecompress({
+					flush: zlib.Z_SYNC_FLUSH,
+					finishFlush: zlib.Z_SYNC_FLUSH
+				}));
 				
 				break;
 		}
 		
-		res.on('data', chunk => chunks.push(chunk)).on('end', () => callback(Buffer.concat(chunks)));
+		res.on('data', chunk => chunks.push(chunk)).on('end', () => callback(Buffer.concat(chunks))).on('error', err => console.error(err) + callback(Buffer.concat(chunks)));
 	}
 	valid_url(...args){
 		var out;
@@ -357,6 +393,7 @@ module.exports = class {
 						return Reflect.apply(target, that, [ obj, prop, desc ]);
 					},
 				},
+				loc: global.location,
 			},
 			URL = global.URL,
 			fills = _pm_.fills = {
@@ -379,7 +416,7 @@ module.exports = class {
 				construct(target, args){
 					var ref = Reflect.construct(target, args);
 					
-					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args.slice(0, -1), 'return(()=>' + rw.js(args.slice(-1)[0], { url: fills.url, origin: global.location, base: fills.url, global: true }) + ')()' ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
+					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args.slice(0, -1), 'return(()=>' + rw.js(args.slice(-1)[0], { url: fills.url, origin: def.loc, base: fills.url, global: true }) + ')()' ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 				apply(target, that, args){
 					var params = args.slice(0, -1),
@@ -398,11 +435,11 @@ module.exports = class {
 				apply: (target, that, args) => def.ref.apply(target, that || {}, [...args].map(arg => def.is_native(that) ? def.unnormal(arg) : arg)),
 			}) ],
 			[ x => x ? (global.fetch = x) : global.fetch, value => new _proxy(value, {
-				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: global.location, route: false }), opts ]),
+				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),
 			}) ],
 			[ x => x ? (global.Blob = x) : global.Blob, value => new _proxy(value, {
 				construct(target, [ data, opts ]){
-					var decoded = opts && rw.mime.js.includes(opts.type) && Array.isArray(data) ? [ rw.js(rw.decode_blob(data), { url: _pm_.fills.url, origin: global.location, base: _pm_.fills.url }) ] : data,
+					var decoded = opts && rw.mime.js.includes(opts.type) && Array.isArray(data) ? [ rw.js(rw.decode_blob(data), { url: _pm_.fills.url, origin: def.loc, base: _pm_.fills.url }) ] : data,
 						blob = Reflect.construct(target, [ decoded, opts ]);
 					
 					_pm_.blob_store.set(blob, decoded[0]);
@@ -433,8 +470,17 @@ module.exports = class {
 			[ x => x ? (global.Reflect.defineProperty = x) : global.Reflect.defineProperty, value => new _proxy(value, def.defineprop_handler) ],
 			/*[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
 			[ x => x ? (placeholder = x) : placeholder, value => placeholder ]*/
+			[ x => x ? (global.History.prototype.pushState = x) : global.History.prototype.pushState, value => new Proxy(value, {
+				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, rw.url(url, { origin: location, base: fills.url }) ]),
+			}) ],
+			[ x => x ? (global.History.prototype.replaceState = x) : global.History.prototype.replaceState, value => new Proxy(value, {
+				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, rw.url(url, { origin: location, base: fills.url }) ]),
+			}) ],
+			/*[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
+			[ x => x ? (placeholder = x) : placeholder, value => placeholder ],*/
+			
 		].forEach(([ orig, apply ]) => {
-			var val = orig();
+			try{ var val = orig() }catch(err){ return; }
 			if(!val || val && ['object', 'function'].includes(typeof val) && val[_pm_.hooked])return;
 			var nval = orig(apply(val));
 			if(nval && ['object', 'function'].includes(typeof nval))nval[_pm_.hooked] = val;
@@ -443,7 +489,7 @@ module.exports = class {
 		/* bind to new url instance */
 		
 		def.get_href = () => {
-			var x = global.location.href;
+			var x = def.loc ? def.loc.href : null;
 			
 			if(!x || !x.hostname)try{
 				x = global.parent.location.href;
@@ -454,28 +500,29 @@ module.exports = class {
 			return x;
 		};
 		
-		if(global.location){
+		
+		if(def.loc){
 			def.url_binds = {
 				replace(url){
-					return global.location.replace(rw.url(url, { base: fills.url, origin: global.location }));
+					return def.loc.replace(rw.url(url, { base: fills.url, origin: def.loc }));
 				},
 				assign(url){
-					return global.location.assign(rw.url(url, { base: fills.url, origin: global.location }));
+					return def.loc.assign(rw.url(url, { base: fills.url, origin: def.loc }));
 				},
 				reload(){
-					global.location.reload();
+					def.loc.reload();
 				},
 			};
 			
 			/* url object proto properties wont change per instance
 			update href */
 			
-			fills._url = new URL(rw.unurl(global.location, { origin: global.location }));
+			fills._url = new URL(rw.unurl(def.loc, { origin: def.loc }));
 			
-			fills.url = new Proxy(def.proxy_targets.url, Object.assign(def.handler(global.location, def.proxy_targets.url), {
-				get: (target, prop, ret) => prop == 'pm_proxy' ? global.location : def.alt_prop(def.url_binds, prop) || (fills._url.href = rw.unurl(global.location, { origin: global.location }), typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret),
+			fills.url = new Proxy(def.proxy_targets.url, Object.assign(def.handler(def.loc, def.proxy_targets.url), {
+				get: (target, prop, ret) => prop == 'pm_proxy' ? def.loc : def.alt_prop(def.url_binds, prop) || (fills._url.href = rw.unurl(def.loc, { origin: def.loc }), typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret),
 				set: (target, prop, value) => {
-					fills._url.href = rw.unurl(global.location, { origin: global.location });
+					fills._url.href = rw.unurl(def.loc, { origin: def.loc });
 					
 					/* cant change much */
 					if(fills._url.protocol == 'blob:')return true;
@@ -484,7 +531,7 @@ module.exports = class {
 					
 					fills._url[prop] = value;
 					
-					if(fills._url.href != ohref)global.location.href = rw.url(fills._url.href, { url: rw.unurl(global.location, { origin: global.location }), origin: global.location });
+					if(fills._url.href != ohref)def.loc.href = rw.url(fills._url.href, { url: rw.unurl(def.loc, { origin: def.loc }), origin: def.loc });
 					
 					return true;
 				},
@@ -503,7 +550,7 @@ module.exports = class {
 				key_item: global.Storage.prototype.key,
 				origin: prop => prop.split('@').splice(-1).join(''),
 				/* sometimes host not set */
-				name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(rw.unurl(def.get_href(), { origin: global.location })).hostname,
+				name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(rw.unurl(def.get_href(), { origin: def.loc })).hostname,
 				unname: (prop = '', split) => (split = prop.split('@'), split.splice(-1), split.join('')),
 			};
 			
@@ -590,7 +637,7 @@ module.exports = class {
 			get referrer(){
 				var ret = def.doc.referrer;
 				
-				return ret ? (rw.unurl(ret, global.location, fills.url, { origin: global.location })||{href:''}).href : fills.url.href;
+				return ret ? (rw.unurl(ret, def.loc, fills.url, { origin: def.loc })||{href:''}).href : fills.url.href;
 			},
 			get location(){
 				return fills.url;
@@ -605,7 +652,7 @@ module.exports = class {
 		
 		global.pm_this = x => (x||0)._pm_?x._pm_.fills.win:x;
 		// get scope => eval inside of scope
-		global.pm_eval = js => '(()=>' + rw.js('return eval(' + rw.wrap(rw.js(js, { url: fills.url, origin: global.location, base: fills.url, scope: false })) + ')', { url: fills.url, origin: location, base: fills.url, rewrite: false }) + ')()';
+		global.pm_eval = js => '(()=>' + rw.js('return eval(' + rw.wrap(rw.js(js, { url: fills.url, origin: def.loc, base: fills.url, scope: false })) + ')', { url: fills.url, origin: location, base: fills.url, rewrite: false }) + ')()';
 		
 		return fills;
 	}
@@ -654,6 +701,8 @@ module.exports = class {
 		if(module.browser && value instanceof global.Request)value = value.url;
 		if(typeof value == 'object')value = value.hasOwnProperty('url') ? value.url : value + '';
 		
+		value = value.replace(this.regex.url.whitespace, '');
+		
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global._pm_.url_store.get(value);
 			
@@ -664,7 +713,7 @@ module.exports = class {
 		
 		var url = this.valid_url(value, data.base);
 		
-		if(!url)return console.log(value), console.log(data.base), value;
+		if(!url)return console.log(value + '\n' + data.base), value;
 		
 		var out = url.href,
 			query = new URLSearchParams();
@@ -681,35 +730,21 @@ module.exports = class {
 		query.set('ref', this.config.codec.encode(data.base.href, data));
 		
 		var qd = encodeURIComponent(query + ''),
-			out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + qd.length.toString(16) + '-' + qd;
+			out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + this.encode_params(query);
 		
 		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
 		
 		return out;
 	}
-	unurl(value, data = {}){
+	unurl(value, data = {}){;
 		var url = new this.URL(value, data.origin || 'http:a'),
-			osearch,
-			start = this.config.prefix.length,
-			size = url.pathname.substr(start, url.pathname.indexOf('-', start + 1) - start),
-			start2 = start + size.length + 1;
+			decoded = this.decode_params(url);
 		
-		if(url){
-			osearch = url.search;
-			
-			try{
-				url.search = decodeURIComponent(url.pathname.substr(start2, start2 + parseInt(size, 16)));
-			}catch(err){
-				return;
-			}
-		}
+		if(!decoded.has('url'))return url;
 		
-		if(!url.searchParams.has('url'))return url.orig = url, url;
+		var out = this.valid_url(this.config.codec.decode(decoded.get('url'), data));
 		
-		var out = this.valid_url(this.config.codec.decode(url.searchParams.get('url'), data));
-		
-		if(out && osearch)out.search = osearch;
-		if(out)out.orig = url;
+		if(out && url.search)out.search = url.search;
 		
 		return out;
 	}
@@ -749,6 +784,8 @@ module.exports = class {
 		return out;
 	}
 	/*<--server_only*/headers_encode(value, data = {}){
+		// prepare headers to be sent to a request url (eg google.com)
+		
 		var out = {};
 		
 		for(var header in value){
@@ -776,7 +813,7 @@ module.exports = class {
 					
 					var url;
 
-					if(data.url.orig)url = this.valid_url(this.config.codec.decode(data.url.orig.searchParams.get('ref'), data));
+					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
 					
 					out[header] = out.Origin = url ? url.origin : data.url.origin;
 					
@@ -789,7 +826,7 @@ module.exports = class {
 			}
 		}
 		
-		out['accept-encoding'] = 'gzip, deflate, br';
+		out['accept-encoding'] = 'gzip, deflate'; // , br
 		
 		out['upgrade-insecure-requests'] = '1';
 		
@@ -830,9 +867,9 @@ module.exports = class {
 		var js_imports = [], js_exports = [], prws = [];
 		
 		if(data.rewrite != false)value = value
-		.replace(this.regex.sourcemap, 'undefined')
+		.replace(this.regex.sourcemap, '# undefined')
 		.replace(this.regex.js.prw_ind, match => (prws.push(match), '/*pmrwins' + (prws.length - 1) + '*/'))
-		.replace(this.regex.js.call_this, 'pm_this(this)')
+		.replace(this.regex.js.call_this, '$1pm_this(this)$2')
 		.replace(this.regex.js.eval, '(x=>eval(pm_eval(x)))')
 		.replace(this.regex.js.construct_this, 'new(pm_this(this))')
 		// move import statements
@@ -842,9 +879,8 @@ module.exports = class {
 		
 		var id = this.hash(value);
 		
-		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ',Window=fills.win?fills.win.Window:fills.Window,location=fills.url,self=fills.win,globalThis=fills.win,top=fills.top,parent=fills.par,frames=fills.win,window=fills.win,document=fills.doc,importScripts=fills.imp;\n' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n/*pmrw' + id + '*/}';
-		// + js_exports.join('\n');
-		// fills=void 0;
+		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ',Window=fills.win?fills.win.Window:fills.Window,location=fills.url,self=fills.win,globalThis=fills.win,top=fills.top,parent=fills.par,frames=fills.win,window=fills.win,document=fills.doc,importScripts=fills.imp;\n' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI(data.url.href.replace(this.regex.js.comment, '/' + String.fromCharCode(8203) + '/') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
+		
 		return value;
 	}
 	css(value, data = {}){
@@ -854,7 +890,7 @@ module.exports = class {
 		
 		[
 			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
-			[this.regex.sourcemap, 'undefined'],
+			[this.regex.sourcemap, '# undefined'],
 			
 			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
@@ -864,7 +900,7 @@ module.exports = class {
 	manifest(value, data = {}){
 		var json;
 		
-		try{ json = JSON.parse(value) }catch(err){ console.log(err); return value };
+		try{ json = JSON.parse(value) }catch(err){ return value };
 		
 		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src'].includes(key) ? this.url(val, data) : val);
 	}
@@ -983,7 +1019,7 @@ module.exports.codec = {
 	base64: {
 		name: 'base64',
 		encode(str){
-			if(!str)return str;
+			if(!str || typeof str != 'string')return str;
 			
 			var b64chs = Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='),
 				u32, c0, c1, c2, asc = '',
@@ -1000,7 +1036,7 @@ module.exports.codec = {
 			return pad ? asc.slice(0, pad - 3) + '==='.substr(pad) : asc;
 		},
 		decode(str){
-			if(!str)return str;
+			if(!str || typeof str != 'string')return str;
 			
 			var b64tab = {"0":52,"1":53,"2":54,"3":55,"4":56,"5":57,"6":58,"7":59,"8":60,"9":61,"A":0,"B":1,"C":2,"D":3,"E":4,"F":5,"G":6,"H":7,"I":8,"J":9,"K":10,"L":11,"M":12,"N":13,"O":14,"P":15,"Q":16,"R":17,"S":18,"T":19,"U":20,"V":21,"W":22,"X":23,"Y":24,"Z":25,"a":26,"b":27,"c":28,"d":29,"e":30,"f":31,"g":32,"h":33,"i":34,"j":35,"k":36,"l":37,"m":38,"n":39,"o":40,"p":41,"q":42,"r":43,"s":44,"t":45,"u":46,"v":47,"w":48,"x":49,"y":50,"z":51,"+":62,"/":63,"=":64};
 			
@@ -1032,5 +1068,19 @@ module.exports.codec.plain = {
 	},
 	decode(str){
 		return str;
+	},
+};
+
+module.exports.codec.xor = {
+	name: 'xor',
+	encode(str){
+		if(!str || typeof str != 'string')return str;
+		
+		return str.split('').map((char, ind) => ind % 2 ? String.fromCharCode(char.charCodeAt() ^ 2) : char).join('');
+	},
+	decode(str){
+		if(!str || typeof str != 'string')return str;
+		
+		return str.split('').map((char, ind) => ind % 2 ? String.fromCharCode(char.charCodeAt() ^ 2) : char).join('');
 	},
 };

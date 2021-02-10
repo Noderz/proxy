@@ -12,7 +12,7 @@ var fs = require('fs'),
 	}),
 	rw = new rewriter({
 		prefix: '/service',
-		codec: rewriter.codec.base64,
+		codec: rewriter.codec.xor,
 		server: server,
 		title: 'Service',
 		interface: config.interface,
@@ -24,12 +24,27 @@ var fs = require('fs'),
 		
 		if(!data.url)return res.cgi_status(400, 'Missing `url` param');
 		
-		data.url = is_url(data.url) ? add_proto(data.url) : 'https://www.google.com/search?q=' + encodeURIComponent(data.url);
+		var url = req.method == 'GET' ? rewriter.codec.base64.decode(data.url) : data.url;
+		
+		url = is_url(url) ? add_proto(url) : 'https://www.google.com/search?q=' + encodeURIComponent(url);
 		
 		switch(req.query.route){
+			case'vi':
+				
+				res.cookies.gateway = { value: 'vi' };
+				res.redirect('/' + encodeURI(url));
+				
+				break;
+			case'ap':
+				
+				res.cookies.gateway = { value: 'ap' };
+				res.redirect('/session?url=' + encodeURIComponent(rewriter.codec.base64.encode(url)));
+				
+				break;
 			default:
 				
-				res.redirect(rw.url(add_proto(data.url), { origin: req.url }));
+				res.cookies.gateway = { value: 'sp' };
+				res.redirect(rw.url(url, { origin: req.url }));
 				
 				break;
 		}

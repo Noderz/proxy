@@ -41,7 +41,6 @@ var rewriter = require('./rewrite.js'),
 					: arg
 			);
 		},
-		state_handler: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, rw.url(url, { origin: location, base: pm.url }) ]),
 	},
 	hook = win => {
 		if(win[_pm_.hooked])return;
@@ -84,16 +83,6 @@ var rewriter = require('./rewrite.js'),
 		
 		win.FontFace = new Proxy(win.FontFace, {
 			construct: (target, [ family, source, descriptors ]) => Reflect.construct(target, [ family, rw.url(source, { origin: location, base: pm.url, type: 'font' }), descriptors ]),
-		});
-		
-		// history functions
-		
-		win.History.prototype.pushState = new Proxy(win.History.prototype.pushState, {
-			apply: pm.state_handler,
-		});
-
-		win.History.prototype.replaceState = new Proxy(win.History.prototype.replaceState, {
-			apply: pm.state_handler,
 		});
 		
 		win.ServiceWorkerContainer.prototype.register = new Proxy(win.ServiceWorkerContainer.prototype.register, {
@@ -213,7 +202,7 @@ var rewriter = require('./rewrite.js'),
 				
 				if(!wind._pm_ || !wind._pm_.fills || !wind._pm_.fills.win){
 					(wind._pm_ || (wind._pm_ = {})).prw = _pm_.prw;
-					wind._pm_.url = new URL(rw.unurl(wind.location.href || location.href, { origin: global.location }));
+					wind._pm_.url = new URL(rw.unurl(wind.location.href || location.href));
 					wind.__pm_init__ = pm.init;
 					
 					new wind.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
