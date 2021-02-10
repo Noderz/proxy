@@ -92,7 +92,7 @@ module.exports = class {
 							type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : url.orig.searchParams.has('type') ? url.orig.searchParams.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 							dec_headers = this.headers_decode(resp.headers, data);
 						
-						res.status(resp.statusCode);
+						res.status(resp.statusCode == 502 ? 400 : resp.statusCode);
 						
 						for(var name in dec_headers)res.set(name, dec_headers[name]);
 						
@@ -131,7 +131,7 @@ module.exports = class {
 						interval = setInterval(() => cli.send('srv-alive'), time / 2),
 						queue = [];
 					
-					srv.on('error', err => console.error(headers, url.href, err) + cli.close());
+					srv.on('error', err => console.error(headers, req.headers, url.href, err) + cli.close());
 					
 					cli.on('message', data => (clearTimeout(timeout), timeout = setTimeout(() => srv.close(), time), data != 'srv-alive' && (srv.readyState && srv.send(data) || queue.push(data))));
 					
@@ -183,7 +183,7 @@ module.exports = class {
 				host: /(:\/+)_(.*?)_/,
 				parsed: /^\/\w+-/,
 			},
-			skip_header: /(?:^sec-websocket-key|^cf-(connect|ip|visitor|ray)|^real|^forwarded-|^x-(real|forwarded|frame)|^strict-transport|content-(security|encoding|length)|transfer-encoding|access-control|sourcemap|trailer)/i,
+			skip_header: /(?:^sec-websocket-key|^cdn-loop|^cf-(request|connect|ip|visitor|ray)|^real|^forwarded-|^x-(real|forwarded|frame)|^strict-transport|content-(security|encoding|length)|transfer-encoding|access-control|sourcemap|trailer)/i,
 			sourcemap: /sourceMappingURL/gi,
 			server_only: /\/\*<--server_only\*\/[\s\S]*?\/\*server_only-->\*\//g,
 			ip: /^192\.168\.|^172\.16\.|^10\.0\.|^127\.0/,
@@ -700,8 +700,7 @@ module.exports = class {
 			try{
 				url.search = decodeURIComponent(url.pathname.substr(start2, start2 + parseInt(size, 16)));
 			}catch(err){
-				console.log(value, err);
-				return value;
+				return;
 			}
 		}
 		

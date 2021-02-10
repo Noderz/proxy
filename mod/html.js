@@ -41,13 +41,7 @@ var rewriter = require('./rewrite.js'),
 					: arg
 			);
 		},
-		state_handler(target, that, [ state, title, url ]){
-			var ret = Reflect.apply(target, that, [ state, title, rw.url(url, { origin: location, base: pm.url }) ]);
-			
-			global._pm_.fills.url_targ = rw.unurl(location.href, { origin: global.location });
-			
-			return;
-		},
+		state_handler: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, rw.url(url, { origin: location, base: pm.url }) ]),
 	},
 	hook = win => {
 		if(win[_pm_.hooked])return;
