@@ -301,7 +301,7 @@ module.exports = class {
 	}
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
-			_pm_ = global._pm_ || (global._pm_ = { blob_store: new Map(), url_store: new Map(), url: new URL(url), hooked: Symbol('pm.hooked') }),
+			_pm_ = global._pm_ || (global._pm_ = { blob_store: new Map(), url_store: new Map(), url: new global.URL(url), hooked: 'pm.hooked' }),
 			def = {
 				get doc(){
 					return global.document;
@@ -362,7 +362,7 @@ module.exports = class {
 			fills = _pm_.fills = {
 				Window: global ? global.Window : undefined,
 				win: new Proxy(def.proxy_targets.win, Object.assign(def.handler(global, def.proxy_targets.win), {
-					get: (t, prop, rec, ret) => ['pm_proxy', _pm_.hooked].includes(prop) ? global : typeof (ret = def.ref.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret,
+					get: (t, prop, rec, ret) => ['pm_proxy', _pm_.hooked].includes(prop) ? global : typeof (ret = def.ref.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret && ret._pm_ ? ret._pm_.fills.win : ret,
 					set: (t, prop, value) => def.has_prop(def.win_binds, prop) ? (def.win_binds[prop] = value) : def.ref.set(global, prop, value),
 				})),
 				doc: def.doc ? new Proxy(def.proxy_targets.doc, Object.assign(def.handler(def.doc, def.proxy_targets.doc), {
@@ -372,7 +372,7 @@ module.exports = class {
 				})) : undefined,
 				imp: typeof global.importScripts == 'function' ? (...args) => global.importScripts(...args.map(url => rw.url(url, { base: fills.url, origin: global.location, type: 'js' }))) : undefined,
 			},
-			_proxy = function(target, desc){return function(...args){return new.target?desc.construct?desc.construct(target,this,args):new target(.args):desc.apply?desc.apply(target,this,args):target(...args)}};
+			_proxy = function(target, desc){return Object.defineProperties(function(...args){return new.target?desc.construct?desc.construct(target,args):new target(...args):desc.apply?desc.apply(target,this,args):target(...args)},Object.getOwnPropertyDescriptors(target))};
 		
 		[
 			[ x => x ? (global.Function = x) : global.Function, value => new _proxy(value, {

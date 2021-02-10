@@ -9,7 +9,7 @@ Object.assign(global._pm_, {
 	fills: {},
 	blob_store: new Map(),
 	url_store: new Map(),
-	hooked: Symbol('pm.hooked'),
+	hooked: 'pm.hooked',
 	prw: prw,
 }, global._pm_);
 
@@ -178,6 +178,9 @@ var rewriter = require('./rewrite.js'),
 			get defaultView(){
 				return global._pm_.fills.win;
 			},
+			get referrer(){
+				return rw.unurl(Reflect.apply(org.referrer.get, this, []));
+			}
 		}) ], [ win.Element, org => ({
 			set nonce(v){ return true; },
 			set integrity(v){ return true; },
