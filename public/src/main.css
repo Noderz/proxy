@@ -68,7 +68,7 @@ body {
 }
 
 .button {
-	--color: 210, 97, 42;
+	--color: 255, 255, 255;
 	cursor: pointer;
 	border: 1px solid rgb(var(--color));
 	background: none;
@@ -88,6 +88,10 @@ body {
 
 .button:focus {
 	box-shadow: 0px 0px 0px 3px rgba(var(--color), 0.5);
+}
+
+.button.orange {
+	--color: 210, 97, 42;
 }
 
 .button.green { --color: 33, 157, 58 }

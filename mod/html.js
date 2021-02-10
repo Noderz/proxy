@@ -102,9 +102,6 @@ var rewriter = require('./rewrite.js'),
 			apply: pm.state_handler,
 		});
 		
-		// win.navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(reg => reg.unregister()));
-		
-		// Reflect.apply(target, that, [ rw.url(url, { origin: location, base: pm.url }), options ])
 		win.ServiceWorkerContainer.prototype.register = new Proxy(win.ServiceWorkerContainer.prototype.register, {
 			apply: (target, that, [ url, options ]) => new Promise((resolve, reject) => reject(new Error('A Service Worker has been blocked for this domain'))),
 		});
@@ -132,7 +129,7 @@ var rewriter = require('./rewrite.js'),
 		window.outerWidth = 1936;
 		window.outerHeight = 1056;
 		
-		[ [ [ Screen ], org => ({
+		[ [ Screen, org => ({
 			get availLeft(){
 				return 0;
 			},
@@ -154,11 +151,11 @@ var rewriter = require('./rewrite.js'),
 			get pixelDepth(){
 				return 24;
 			}
-		}) ], [ [ MouseEvent ], org => ({
+		}) ], [ MouseEvent, org => ({
 			initMouseEvent(...args){
 				return Reflect.apply(org.initMouseEvent.value, this, pm.normal(args));
 			},
-		}) ], [ [ win.Event ], org => ({
+		}) ], [ win.Event, org => ({
 			get target(){
 				return pm.unnormal(Reflect.apply(org.target.get, this, []));
 			},
@@ -171,7 +168,7 @@ var rewriter = require('./rewrite.js'),
 			get path(){
 				return pm.unnormal(Reflect.apply(org.path.get, this, []));
 			},
-		}) ], [ [ win.Document ], org => ({
+		}) ], [ win.Document, org => ({
 			get cookie(){
 				return rw.cookie_decode(Reflect.apply(org.cookie.get, this, []), pm.rw_data());
 			},
@@ -181,7 +178,7 @@ var rewriter = require('./rewrite.js'),
 			get defaultView(){
 				return global._pm_.fills.win;
 			},
-		}) ], [[ win.Element ], org => ({
+		}) ], [ win.Element, org => ({
 			set nonce(v){ return true; },
 			set integrity(v){ return true; },
 			setAttribute(attr, val){
@@ -201,7 +198,7 @@ var rewriter = require('./rewrite.js'),
 			getAttribute(attr){
 				var val = Reflect.apply(org.getAttribute.value, this, [ attr ]);
 				
-				return rw.attr.url[1].includes(attr) ? rw.unurl(val, { origin: global.location }) : val;
+				return rw.attr.url[1].includes(attr) ? rw.unurl(val, { origin: global.location }).toString() : val;
 			},
 			setAttributeNS(namespace, attr, val){
 				return rw.attr.del[1].includes(attr) ? true : Reflect.apply(org.setAttributeNS.value, this, [ namespace, attr, rw.attr.url[1].includes(attr) ? rw.url(val, { origin: location, base: pm.url }) : val ]);
@@ -210,7 +207,7 @@ var rewriter = require('./rewrite.js'),
 			insertAdjacentHTML(where, html, is_pm){
 				return Reflect.apply(org.insertAdjacentHTML.value, this, [ where, is_pm == 'proxied' ? html : rw.html(html, pm.rw_data({ snippet: true })) ]);
 			},
-		})], [[ win.HTMLIFrameElement ], org => ({
+		})], [ win.HTMLIFrameElement, org => ({
 			set contentWindow(v){return v},
 			get contentWindow(){
 				var wind = Reflect.apply(org.contentWindow.get, this, []);
@@ -233,7 +230,7 @@ var rewriter = require('./rewrite.js'),
 			set srcdoc(v){
 				return Reflect.apply(org.srcdoc.set, this, [ rw.html(v, pm.rw_data()) ]);
 			},
-		}) ], [[ win.HTMLElement ], org => ({
+		}) ], [ win.HTMLElement, org => ({
 			get style(){
 				var style = Reflect.apply(org.style.get, this, []);
 				
@@ -248,7 +245,7 @@ var rewriter = require('./rewrite.js'),
 			get ownerDocument(){
 				return global._pm_.fills.doc;
 			},
-		}), ], [[ win.Element ], org => ({
+		}), ], [ win.Element, org => ({
 			get innerHTML(){
 				return Reflect.apply(org.innerHTML.get, this, []);
 			},
@@ -261,7 +258,7 @@ var rewriter = require('./rewrite.js'),
 			set outerHTML(v){
 				return Reflect.apply(org.outerHTML.set, this, [ rw.html(v, { snippet: true, origin: location, url: pm.url, base: pm.url }) ]);
 			},
-		}) ], [[ win.Node ], org => ({
+		}) ], [ win.Node, org => ({
 			/*appendChild(node){
 				var ret = Reflect.apply(org.appendChild.value, this, [ node ]);
 				
@@ -269,7 +266,7 @@ var rewriter = require('./rewrite.js'),
 				
 				return ret;
 			},*/
-		})], [[ win.MessageEvent ], org => ({
+		})], [ win.MessageEvent, org => ({
 			get origin(){
 				var data = Reflect.apply(org.data.get, this, []);
 				
@@ -287,18 +284,7 @@ var rewriter = require('./rewrite.js'),
 				
 				return data[0] == 'proxied' ? data[2] : data;
 			}
-		}) ] ].forEach(([ cons, def ]) => cons.forEach(con =>
-			Object.defineProperties(con.prototype, Object.getOwnPropertyDescriptors(def(
-				Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(con.prototype)).map(([ key, val ]) => [ key, {
-					get: val.get,
-					set: val.set,
-					value: val.value,
-					writable: val.writable,
-					enumerable: val.enumerable,
-					configurable: val.configurable
-				} ]))
-			)))
-		));
+		}) ] ].forEach(([ con, def ]) => Object.defineProperties(con.prototype, Object.getOwnPropertyDescriptors(def(Object.getOwnPropertyDescriptors(con.prototype)))));
 		
 		var org_a = Object.getOwnPropertyDescriptors(HTMLAnchorElement.prototype);
 		

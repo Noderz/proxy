@@ -100,7 +100,7 @@ module.exports = class {
 						
 						if(failure)return;
 						
-						res.send(url.orig.searchParams.get('false') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body);
+						res.send(url.orig.searchParams.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body);
 					})).on('error', err => {
 						clearTimeout(timeout);
 						
@@ -329,7 +329,7 @@ module.exports = class {
 				}),
 				/* if a property can be changed and manipulated */
 				prop: (o, p, d) => (d = Object.getOwnPropertyDescriptor(o, p), !d ? true : d && (!d.configurable || !d.writable) && (!d.configurable ? def.ref.deleteProperty(o, p) : true) && Object.defineProperty(o, p, Object.assign(d, { configurable: true }, def.has_prop(d, 'writable') ? { writable: true } : {}))),
-				bind_orig: Function.prototype.bind.pm_original || Function.prototype.bind,
+				bind_orig: Function.prototype.bind.pm_orig || Function.prototype.bind,
 				bind: (a, b) => def.ref.apply(def.bind_orig, a, [ b ]),
 				/* restore args */
 				unnormal: arg => arg && arg[_pm_.hooked] ? arg[_pm_.hooked] : arg,
@@ -380,7 +380,7 @@ module.exports = class {
 		if(!_pm_.hooked_all){
 			_pm_.hooked_all = true;
 			
-			Function.prototype.bind.pm_original = Function.prototype.bind;
+			Function.prototype.bind.pm_orig = Function.prototype.bind;
 			
 			/* prevent mismatching or binding native function to proxied native */
 			
@@ -454,7 +454,7 @@ module.exports = class {
 				},
 			});
 			
-			global.URL.createObjectURL.pm_original = orig;
+			global.URL.createObjectURL.pm_orig = orig;
 			
 			global.URL.createObjectURL[_pm_.hooked] = true;
 		}
@@ -681,7 +681,7 @@ module.exports = class {
 		
 		if(!data.origin)throw new TypeError('give origin');
 		
-		data.base = data.base || this.unurl(data.origin);
+		data.base = this.valid_url(data.base || this.unurl(data.origin));
 		
 		data.origin = new URL(data.origin).origin;
 		
@@ -703,7 +703,7 @@ module.exports = class {
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global._pm_.url_store.get(value);
 			
-			if(raw)return (URL.createObjectURL.pm_original || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+			if(raw)return (URL.createObjectURL.pm_orig || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
@@ -724,7 +724,7 @@ module.exports = class {
 		if(data.type)query.set('type', data.type);
 		if(data.hasOwnProperty('route'))query.set('route', data.route);
 		
-		query.set('ref', this.config.codec.encode(data.base + '', data));
+		query.set('ref', this.config.codec.encode(data.base.href, data));
 		
 		var qd = encodeURIComponent(query + ''),
 			out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + qd.length.toString(16) + '-' + qd;
@@ -964,7 +964,7 @@ module.exports = class {
 					break;
 			}
 			
-			node.getAttributeNames().forEach(name => this.html_attr(node, name, data));
+			node.getAttributeNames().forEach(name => !name.startsWith('data-') && this.html_attr(node, name, data));
 		});
 		
 		if(!data.snippet)document.head.insertAdjacentHTML('afterbegin', `${charset}<title>${this.config.title}</title><link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'><script src=".${this.config.prefix}?html=${this.preload[1]}"></script>`, 'proxied');
@@ -972,13 +972,15 @@ module.exports = class {
 		return this.html_serial(document);
 	}
 	html_attr(node, name, data){
-		var value = node.getAttribute(name);
+		var ovalue, value = node.rworig_getAttribute ? node.rworig_getAttribute(name) : node.getAttribute(name);
+		
+		ovalue = value;
 		
 		if(!value)return;
 		
 		value = (value + '').replace(this.regex.newline, '');
 		
-		var tag = (node.tagName || '').toLowerCase(),
+		var	tag = (node.tagName || '').toLowerCase(),
 			attr_type = name.startsWith('on') || (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0];
 		
 		switch(attr_type){
@@ -1003,8 +1005,7 @@ module.exports = class {
 				break;
 		}
 		
-		// node.setAttribute(name, value);
-		try{ node.setAttribute(name, value); }catch(err){ node[name] = value };
+		node.setAttribute(name, value);
 	}
 	plain(value, data){
 		if(!value)return '';
