@@ -301,6 +301,7 @@ module.exports = class {
 	}
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
+			_pm_ = global._pm_ || (global._pm_ = { blob_store: new Map(), url_store: new Map(), url: new URL(url), hooked: Symbol('pm.hooked') }),
 			def = {
 				get doc(){
 					return global.document;
@@ -313,10 +314,6 @@ module.exports = class {
 					getOwnPropertyDescriptor: (t, p) => def.ref.getOwnPropertyDescriptor(prox_targ, p),
 					defineProperty: (t, prop, desc) => {
 						
-						/*Reflect.defineProperty(prox_targ, prop, desc);
-						desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true;
-						hook defineProperty on object and EVERYTHINg
-						*/
 						Reflect.defineProperty(prox_targ, prop, desc);
 						
 						return Reflect.defineProperty(tg, prop, desc);
@@ -329,7 +326,7 @@ module.exports = class {
 				}),
 				/* if a property can be changed and manipulated */
 				prop: (o, p, d) => (d = Object.getOwnPropertyDescriptor(o, p), !d ? true : d && (!d.configurable || !d.writable) && (!d.configurable ? def.ref.deleteProperty(o, p) : true) && Object.defineProperty(o, p, Object.assign(d, { configurable: true }, def.has_prop(d, 'writable') ? { writable: true } : {}))),
-				bind_orig: Function.prototype.bind.pm_orig || Function.prototype.bind,
+				bind_orig: Function.prototype.bind[_pm_.hooked] || Function.prototype.bind,
 				bind: (a, b) => def.ref.apply(def.bind_orig, a, [ b ]),
 				/* restore args */
 				unnormal: arg => arg && arg[_pm_.hooked] ? arg[_pm_.hooked] : arg,
@@ -362,7 +359,6 @@ module.exports = class {
 				},
 			},
 			URL = global.URL,
-			_pm_ = global._pm_ || (global._pm_ = { blob_store: new Map(), url_store: new Map(), url: new URL(url), hooked: Symbol('pm.hooked') }),
 			fills = _pm_.fills = {
 				Window: global ? global.Window : undefined,
 				win: new Proxy(def.proxy_targets.win, Object.assign(def.handler(global, def.proxy_targets.win), {
@@ -377,42 +373,12 @@ module.exports = class {
 				imp: typeof global.importScripts == 'function' ? (...args) => global.importScripts(...args.map(url => rw.url(url, { base: fills.url, origin: global.location, type: 'js' }))) : undefined,
 			};
 		
-		if(!_pm_.hooked_all){
-			_pm_.hooked_all = true;
-			
-			Function.prototype.bind.pm_orig = Function.prototype.bind;
-			
-			/* prevent mismatching or binding native function to proxied native */
-			
-			Function.prototype.bind = new Proxy(Function.prototype.bind, {
-				apply: (target, that, args) => def.ref.apply(target, that, def.is_native(that) ? args.map(def.unnormal) : args),
-			});
-			
-			Function.prototype.apply = new Proxy(Function.prototype.apply, {
-				apply: (target, that, args) => def.ref.apply(target, that, [...args].map(arg => def.is_native(that) ? def.unnormal(arg) : arg)),
-			});
-			
-			Function.prototype.call = new Proxy(Function.prototype.call, {
-				apply: (target, that, args) => def.ref.apply(target, that || {}, [...args].map(arg => def.is_native(that) ? def.unnormal(arg) : arg)),
-			});
-		}
-		
-		if(global.fetch && !global.fetch[_pm_.hooked]){
-			global.fetch = new Proxy(global.fetch, {
-				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: global.location, route: false }), opts ]),
-			});
-			
-			global.fetch[_pm_.hooked] = true;
-		}
-		
-		if(global.Function && !global.Function[_pm_.hooked]){
-			global.Function = new Proxy(global.Function, {
+		[
+			[ x => x ? (global.Function = x) : global.Function, value => new global.Proxy(value, {
 				construct(target, args){
 					var ref = Reflect.construct(target, args);
 					
-					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args.slice(0, -1), 'return(()=>' + rw.js(args.slice(-1)[0], { url: fills.url, origin: global.location, base: fills.url, global: true }) + ')()' ]), Object.getOwnPropertyDescriptors(ref)), {
-						toString: ref.toString.bind(ref),
-					});
+					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args.slice(0, -1), 'return(()=>' + rw.js(args.slice(-1)[0], { url: fills.url, origin: global.location, base: fills.url, global: true }) + ')()' ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 				apply(target, that, args){
 					var params = args.slice(0, -1),
@@ -420,13 +386,20 @@ module.exports = class {
 					
 					return Reflect.apply(target, that, [ ...params, 'return(()=>' + rw.js(script , _pm_) + ')()' ])
 				},
-			});
-			
-			global.Function[_pm_.hooked] = true;
-		}
-		
-		if(global.Blob && !global.Blob[_pm_.hooked]){
-			global.Blob = new Proxy(global.Blob, {
+			}) ],
+			[ x => x ? (global.Function.prototype.bind = x) : global.Function.prototype.bind, value => new global.Proxy(value, {
+				apply: (target, that, args) => def.ref.apply(target, that, def.is_native(that) ? args.map(def.unnormal) : args),
+			}) ],
+			[ x => x ? (global.Function.prototype.apply = x) : global.Function.prototype.apply, value => new global.Proxy(value, {
+				apply: (target, that, args) => def.ref.apply(target, that, [...args].map(arg => def.is_native(that) ? def.unnormal(arg) : arg)),
+			}) ],
+			[ x => x ? (global.Function.prototype.call = x) : global.Function.prototype.call, value => new global.Proxy(value, {
+				apply: (target, that, args) => def.ref.apply(target, that || {}, [...args].map(arg => def.is_native(that) ? def.unnormal(arg) : arg)),
+			}) ],
+			[ x => x ? (global.fetch = x) : global.fetch, value => new global.Proxy(value, {
+				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: global.location, route: false }), opts ]),
+			}) ],
+			[ x => x ? (global.Blob = x) : global.Blob, value => new global.Proxy(value, {
 				construct(target, [ data, opts ]){
 					var decoded = opts && rw.mime.js.includes(opts.type) && Array.isArray(data) ? [ rw.js(rw.decode_blob(data), { url: _pm_.fills.url, origin: global.location, base: _pm_.fills.url }) ] : data,
 						blob = Reflect.construct(target, [ decoded, opts ]);
@@ -435,16 +408,8 @@ module.exports = class {
 					
 					return blob;
 				},
-			});
-			
-			global.Blob[_pm_.hooked] = true;
-		}
-		
-		if(global.URL && global.URL.createObjectURL && !global.URL.createObjectURL[_pm_.hooked]){
-			var orig = global.URL.createObjectURL;
-			
-			/* add to blobstore and remove when needed */
-			global.URL.createObjectURL = new Proxy(global.URL.createObjectURL, {
+			}) ],
+			[ x => x ? (global.URL.createObjectURL = x) : global.URL.createObjectURL, value => new global.Proxy(value, {
 				apply(target, that, [ blob ]){
 					var url = Reflect.apply(target, that, [ blob ]);
 					
@@ -452,15 +417,8 @@ module.exports = class {
 					
 					return url;
 				},
-			});
-			
-			global.URL.createObjectURL.pm_orig = orig;
-			
-			global.URL.createObjectURL[_pm_.hooked] = true;
-		}
-		
-		if(global.URL && global.URL.revokeObjectURL && !global.URL.revokeObjectURL[_pm_.hooked]){
-			global.URL.revokeObjectURL = new Proxy(global.URL.revokeObjectURL, {
+			}) ],
+			[ x => x ? (global.URL.revokeObjectURL = x) : global.URL.revokeObjectURL, value => new global.Proxy(value, {
 				apply(target, that, [ url ]){
 					var ret = Reflect.apply(target, that, [ url ]);
 					
@@ -469,22 +427,17 @@ module.exports = class {
 					
 					return ret;
 				},
-			});
-			
-			global.URL.revokeObjectURL[_pm_.hooked] = true;
-		}
-		
-		if(Object.defineProperty && !Object.defineProperty[_pm_.hooked]){
-			Object.defineProperty = new Proxy(Object.defineProperty, def.defineprop_handler);
-			
-			Object.defineProperty[_pm_.hooked] = true;  
-		}
-		
-		if(Reflect.defineProperty && !Reflect.defineProperty[_pm_.hooked]){
-			Reflect.defineProperty = new Proxy(Reflect.defineProperty, def.defineprop_handler);
-			
-			Reflect.defineProperty[_pm_.hooked] = true;  
-		}
+			}) ],
+			[ x => x ? (global.Object.defineProperty = x) : global.Object.defineProperty, value => new global.Proxy(value, def.defineprop_handler) ],
+			[ x => x ? (global.Reflect.defineProperty = x) : global.Reflect.defineProperty, value => new global.Proxy(value, def.defineprop_handler) ],
+			/*[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
+			[ x => x ? (placeholder = x) : placeholder, value => placeholder ]*/
+		].forEach(([ orig, apply ]) => {
+			var val = orig();
+			if(!val || val && ['object', 'function'].includes(typeof val) && val[_pm_.hooked])return;
+			var nval = orig(apply(val));
+			if(nval && ['object', 'function'].includes(typeof nval))nval[_pm_.hooked] = val;
+		});
 		
 		/* bind to new url instance */
 		
@@ -703,7 +656,7 @@ module.exports = class {
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global._pm_.url_store.get(value);
 			
-			if(raw)return (URL.createObjectURL.pm_orig || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+			if(raw)return (URL.createObjectURL[_pm_.hooked] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
