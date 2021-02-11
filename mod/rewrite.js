@@ -720,7 +720,7 @@ module.exports = class {
 		
 		if(url.pathname.match(this.regex.url.parsed) && url.pathname.startsWith(this.config.prefix))return value;
 		
-		if(url.origin == data.origin && url.origin == data.base.origin)console.error('origin conflict', url.href, data.base.href, data.origin);
+		if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
 		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
 		
 		query.set('url', this.config.codec.encode(out, data));
@@ -779,7 +779,7 @@ module.exports = class {
 			}
 		};
 		
-		out['x-rwog'] = JSON.stringify(value);
+		// out['x-rwog'] = JSON.stringify(value);
 		
 		return out;
 	}
@@ -815,7 +815,7 @@ module.exports = class {
 
 					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
 					
-					out[header] = out.Origin = url ? url.origin : data.url.origin;
+					out.Origin = url ? url.origin : data.url.origin;
 					
 					break;
 				default:
@@ -1079,8 +1079,7 @@ module.exports.codec.xor = {
 		return str.split('').map((char, ind) => ind % 2 ? String.fromCharCode(char.charCodeAt() ^ 2) : char).join('');
 	},
 	decode(str){
-		if(!str || typeof str != 'string')return str;
-		
-		return str.split('').map((char, ind) => ind % 2 ? String.fromCharCode(char.charCodeAt() ^ 2) : char).join('');
-	},
+		// same process
+		return this.encode(str);
+	}
 };
