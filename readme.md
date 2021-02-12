@@ -2,7 +2,8 @@
 
 ## quickstart:
 
-`git clone https://github.com/sysce/proxy ./sys-proxy`
+```sh
+git clone https://github.com/sysce/proxy ./sys-proxy
 
-`node ./sys-proxy/demo`
-
+node ./sys-proxy/demo
+```
