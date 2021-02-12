@@ -13,7 +13,7 @@ Object.assign(global._pm_, {
 	prw: prw,
 }, global._pm_);
 
-var rewriter = require('./rewrite.js'),
+var rewriter = require('./index.js'),
 	rw = new rewriter(rewrite_conf),
 	pm = {
 		get_href(){

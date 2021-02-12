@@ -1,7 +1,7 @@
 {
 	"name": "sys-nodehttp",
 	"description": "woah",
-	"version": "1.2.3",
+	"version": "1.2.4",
 	"main": "index.js",
 	"repository": {
 		"type": "git",

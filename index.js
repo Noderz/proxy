@@ -81,13 +81,9 @@ module.exports = class {
 							
 							if(failure)return;
 							
-							try{
-								res.send(decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body);
-							}catch(err){
-								console.error(err);
-								
-								res.cgi_status(400, err);
-							}
+							var body = decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body;
+							
+							res.compress('br', body);
 						})).on('error', err => {
 							clearTimeout(timeout);
 							
@@ -259,7 +255,7 @@ module.exports = class {
 				path.join(__dirname, 'url.js'),
 				__filename,
 			]).run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''))).then(data => {
-				this.prw = data.code + 'return require("./rewrite.js")';
+				this.prw = data.code + 'return require("./index.js")';
 			});
 			
 			terser.minify('function ' + this.globals).then(data => this.glm = this.config.glm = data.code);
