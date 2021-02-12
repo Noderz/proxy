@@ -1,14 +1,17 @@
 'use strict';
 var fs = require('fs'),
 	path = require('path'),
-	config = JSON.parse(fs.readFileSync(path.join(__dirname, 'data', 'config.json'))),
 	nodehttp = require('sys-nodehttp'),
-	rewriter = require(path.join(__dirname, 'mod', 'rewrite.js')),
+	rewriter = require('../'),
+	config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'))),
 	server = new nodehttp.server({
 		port: config.port,
 		address: config.address,
 		static: path.join(__dirname, 'public'),
-		ssl: config.ssl ? { key: fs.readFileSync(path.join(__dirname, 'data', 'ssl.key'), 'utf8'), cert: fs.readFileSync(path.join(__dirname, 'data', 'ssl.crt'), 'utf8') } : false,
+		ssl: config.ssl ? {
+			key: fs.readFileSync(path.join(__dirname, 'ssl.key'), 'utf8'),
+			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
+		} : false,
 	}),
 	rw = new rewriter({
 		prefix: '/service',

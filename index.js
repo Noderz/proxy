@@ -6,9 +6,9 @@ var fs = require('fs'),
 	path = require('path'),
 	http = require('http'),
 	https = require('https'),
-	ws = require(path.join(__dirname, 'ws.js')),
-	jsdom = require(path.join(__dirname, 'jsdom.js')).JSDOM,
-	terser = require(path.join(__dirname, 'terser.js'));
+	ws = require('./ws.js'),
+	jsdom = require('./jsdom.js').JSDOM,
+	terser = require('./terser.js');
 /*server_only-->*/
 
 var URL = require('./url.js');
@@ -43,7 +43,7 @@ module.exports = class {
 				if(req.url.searchParams.has('html'))return res.contentType('application/javascript').send(this.preload[0] || '');
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 				
-				var url = this.unurl(req.url),
+				var url = this.valid_url(this.unurl(req.url)),
 					data = { origin: req.url, url: url, base: url },
 					failure = false,
 					timeout = setTimeout(() => !res.resp.sent_body && (failure = true, res.cgi_status(500, 'Timeout')), this.config.timeout);
@@ -112,9 +112,9 @@ module.exports = class {
 				
 				wss.on('connection', (cli, req) => {
 					var req_url = new this.URL(req.url, new URL('wss://' + req.headers.host)),
-						url = this.unurl(req_url);
+						url = this.valid_url(this.unurl(req_url));
 					
-					if(url.href.includes('studyflow'))return cli.close();
+					if(!url || url.href.includes('studyflow'))return cli.close();
 					
 					var headers = this.headers_encode(req.headers, { url: url, origin: req_url, base: url }),
 						srv = new ws(url, {
@@ -227,7 +227,7 @@ module.exports = class {
 					return this.path ? this.path.relative(__dirname, path) : path;
 				}
 				run(){
-					return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f,u)=>{f=l[new URL(n,e).pathname];if(!f)throw new TypeError("Cannot find module \'"+n+"\'");!f.e&&f.apply((f.e={}),[{browser:!0,get exports(){return f.e},set exports(v){return f.e=v}},f.e,i(h+f.name),new(_=>_).constructor("return this")()]);return f.e},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
+					return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f,u)=>{f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname];if(!f)throw new TypeError("Cannot find module \'"+n+"\'");!f.e&&f.apply((f.e={}),[{browser:!0,get exports(){return f.e},set exports(v){return f.e=v}},f.e,i(h+f.name),new(_=>_).constructor("return this")()]);return f.e},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
 				}
 			};
 			
@@ -245,7 +245,7 @@ module.exports = class {
 				if(this.preload[1] == times)return;
 				
 				var ran = await bundler.run().then(code => code.replace(this.regex.js.server_only, '')),
-					merged = 'document.currentScript.remove();window.__pm_init__=(rewrite_conf,prw)=>{' + ran + 'require("./html.js")};window.__pm_init__(' + this.str_conf() + ')';
+					merged = 'document.currentScript&&document.currentScript.remove();window.__pm_init__=(rewrite_conf,prw)=>{' + ran + 'require("./html.js")};window.__pm_init__(' + this.str_conf() + ')';
 				
 				this.preload = [ await terser.minify(merged, {
 					compress: {
@@ -273,16 +273,18 @@ module.exports = class {
 		}
 	}
 	decode_params(url){
-		var osearch,
-			start = this.config.prefix.length,
-			size = url.pathname.substr(start, url.pathname.indexOf('-', start + 1) - start),
-			start2 = start + size.length + 1;
+		url = url + '';
 		
-		try{
-			return new URLSearchParams(decodeURIComponent(url.pathname.substr(start2, start2 + parseInt(size, 16))));
-		}catch(err){
-			return console.error(err), url.searchParams;
-		}
+		var start = url.indexOf(this.config.prefix) + this.config.prefix.length,
+			size = url.substr(start, url.indexOf('-', start + 1) - start),
+			start2 = start + size.length + 1,
+			out = new this.URL.searchParams(decodeURIComponent(url.substr(start2, start2 + parseInt(size, 16)))),
+			search_ind = url.indexOf('?');
+		
+		// osearch is to return original search value
+		if(search_ind != -1)out.osearch = url.substr(search_ind);
+		
+		return out;
 	}
 	encode_params(params){
 		var str = params.toString();
@@ -337,7 +339,8 @@ module.exports = class {
 	}
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
-			_pm_ = global._pm_ || (global._pm_ = { blob_store: new Map(), url_store: new Map(), url: new global.URL(url), hooked: 'pm.hooked' }),
+			URL = rw.URL,
+			_pm_ = global._pm_ || (global._pm_ = { blob_store: new Map(), url_store: new Map(), url: new URL(url), hooked: 'pm.hooked' }),
 			def = {
 				get doc(){
 					return global.document;
@@ -395,7 +398,6 @@ module.exports = class {
 				},
 				loc: global.location,
 			},
-			URL = global.URL,
 			fills = _pm_.fills = {
 				Window: global ? global.Window : undefined,
 				win: new Proxy(def.proxy_targets.win, Object.assign(def.handler(global, def.proxy_targets.win), {
@@ -637,7 +639,7 @@ module.exports = class {
 			get referrer(){
 				var ret = def.doc.referrer;
 				
-				return ret ? (rw.unurl(ret, def.loc, fills.url, { origin: def.loc })||{href:''}).href : fills.url.href;
+				return ret ? new URL(rw.unurl(ret, def.loc, fills.url, { origin: def.loc })||{href:''}).href : fills.url.href;
 			},
 			get location(){
 				return fills.url;
@@ -684,14 +686,12 @@ module.exports = class {
 		
 		data.base = this.valid_url(data.base || this.unurl(data.origin));
 		
-		data.origin = new URL(data.origin).origin;
+		data.origin = this.valid_url(data.origin).origin || data.origin;
 		
 		if(module.browser && data.base.origin == 'null'){
 			var x = global.location.href;
 			
-			if(!x || !x.hostname)try{
-				x = global.parent.location.href;
-			}catch(err){}
+			if(!x || !x.hostname)try{ x = global.parent.location.href }catch(err){}
 			
 			try{ x = new URL(x) }catch(err){};
 			
@@ -713,14 +713,14 @@ module.exports = class {
 		
 		var url = this.valid_url(value, data.base);
 		
-		if(!url)return console.log(value + '\n' + data.base), value;
+		if(!url)return value;
 		
 		var out = url.href,
-			query = new URLSearchParams();
+			query = new this.URL.searchParams();
 		
 		if(url.pathname.match(this.regex.url.parsed) && url.pathname.startsWith(this.config.prefix))return value;
 		
-		if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
+		// if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
 		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
 		
 		query.set('url', this.config.codec.encode(out, data));
@@ -737,14 +737,14 @@ module.exports = class {
 		return out;
 	}
 	unurl(value, data = {}){;
-		var url = new this.URL(value, data.origin || 'http:a'),
-			decoded = this.decode_params(url);
+		var decoded = this.decode_params(value);
 		
-		if(!decoded.has('url'))return url;
+		if(!decoded.has('url'))return value;
 		
-		var out = this.valid_url(this.config.codec.decode(decoded.get('url'), data));
+		var out = this.config.codec.decode(decoded.get('url'), data),
+			search_ind = out.indexOf('?');
 		
-		if(out && url.search)out.search = url.search;
+		if(decoded.osearch)out = out.substr(0, search_ind == -1 ? out.length : search_ind) + decoded.osearch;
 		
 		return out;
 	}
@@ -762,7 +762,7 @@ module.exports = class {
 					break;
 				case'websocket-origin':
 					
-					out[header] = this.config.codec.decode(data.url.searchParams.get('origin'), data) || data.url.origin;
+					out[header] = this.config.codec.decode(this.valid_url(data.url).searchParams.get('origin'), data) || this.valid_url(data.url).origin;
 					
 					break;
 				case'websocket-location':
@@ -795,7 +795,7 @@ module.exports = class {
 				case'referrer':
 				case'referer':
 					
-					out[header] = data.origin.searchParams.has('ref') ? this.config.codec.decode(data.origin.searchParams.get('ref'), data) : data.url.href;
+					out[header] = data.origin.searchParams.has('ref') ? this.config.codec.decode(data.origin.searchParams.get('ref'), data) : this.valid_url(data.url).href;
 					
 					break;
 				case'cookie':
@@ -805,7 +805,7 @@ module.exports = class {
 					break;
 				case'host':
 					
-					out[header] = data.url.host;
+					out[header] = this.valid_url(data.url).host;
 					
 					break;
 				case'sec-websocket-key': break;
@@ -815,7 +815,7 @@ module.exports = class {
 
 					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
 					
-					out.Origin = url ? url.origin : data.url.origin;
+					out.Origin = url ? url.origin : this.valid_url(data.url).origin;
 					
 					break;
 				default:
@@ -832,7 +832,7 @@ module.exports = class {
 		
 		delete out['cache-control'];
 		
-		out.host = data.url.host;
+		out.host = this.valid_url(data.url).host;
 		
 		return out;
 	}/*server_only-->*/
@@ -843,7 +843,7 @@ module.exports = class {
 			if(split[0] == 'secure')return '';
 			else if(split[0] == 'domain')split[1] = data.origin.hostname;
 			else if(split[0] == 'path')split[1] = '/';
-			else if(!['expires', 'path', 'httponly', 'samesite'].includes(split[0]))split[0] += '@' + data.url.hostname;
+			else if(!['expires', 'path', 'httponly', 'samesite'].includes(split[0]))split[0] += '@' + this.valid_url(data.url).hostname;
 			
 			
 			return split[0] + (split[1] ? '=' + split[1] + ';' : ';');
@@ -855,7 +855,7 @@ module.exports = class {
 				fn = split[0].split('@'),
 				origin = fn.splice(-1).join('');
 			
-			return fn && data.url.hostname.includes(origin) ? fn[0] + '=' + split[1] + ';' : null;
+			return fn && this.valid_url(data.url).hostname.includes(origin) ? fn[0] + '=' + split[1] + ';' : null;
 		}).filter(v => v).join(' ');
 	}
 	/* methods */
@@ -879,7 +879,7 @@ module.exports = class {
 		
 		var id = this.hash(value);
 		
-		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ',Window=fills.win?fills.win.Window:fills.Window,location=fills.url,self=fills.win,globalThis=fills.win,top=fills.top,parent=fills.par,frames=fills.win,window=fills.win,document=fills.doc,importScripts=fills.imp;\n' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI(data.url.href.replace(this.regex.js.comment, '/' + String.fromCharCode(8203) + '/') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
+		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ',Window=fills.win?fills.win.Window:fills.Window,location=fills.url,self=fills.win,globalThis=fills.win,top=fills.top,parent=fills.par,frames=fills.win,window=fills.win,document=fills.doc,importScripts=fills.imp;\n' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI(this.valid_url(data.url).href.replace(this.regex.js.comment, '/' + String.fromCharCode(8203) + '/') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
 		
 		return value;
 	}
@@ -946,7 +946,7 @@ module.exports = class {
 					break;
 				case'base':
 					
-					if(node.href)data.url = data.base = new URL(node.href, data.url.href);
+					if(node.href)data.url = data.base = new URL(node.href, this.valid_url(data.url).href);
 					
 					node.remove();
 					

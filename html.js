@@ -60,7 +60,7 @@ var rewriter = require('./rewrite.js'),
 		});
 		
 		win.postMessage = new Proxy(win.postMessage, {
-			apply: (target, that, [ message, origin, transfer ]) => Reflect.apply(target, win, [ [ 'proxied', origin, message ], location.origin, transfer ]),
+			apply: (target, that, [ message, origin, transfer ]) => Reflect.apply(target, win, [ [ 'proxied', origin, message ], pm.get_href(), transfer ]),
 		});
 		
 		// workers and websockets
@@ -184,7 +184,7 @@ var rewriter = require('./rewrite.js'),
 			getAttribute(attr){
 				var val = Reflect.apply(org.getAttribute.value, this, [ attr ]);
 				
-				return rw.attr.url[1].includes(attr) ? rw.unurl(val, { origin: global.location }).toString() : val;
+				return rw.attr.url[1].includes(attr) ? rw.unurl(val, { origin: global.location }) : val;
 			},
 			setAttributeNS(namespace, attr, val){
 				return rw.attr.del[1].includes(attr) ? true : Reflect.apply(org.setAttributeNS.value, this, [ namespace, attr, rw.attr.url[1].includes(attr) ? rw.url(val, { origin: location, base: pm.url }) : val ]);
@@ -299,7 +299,7 @@ var rewriter = require('./rewrite.js'),
 					var inp = Reflect.apply(org[attr].get, this, []),
 						out = rw.unurl(inp, { origin: global.location });
 					
-					return out ? out.href : inp;
+					return out || inp;
 				},
 				set(v){
 					return rw.html_attr({
@@ -413,10 +413,9 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 			newContainer.addEventListener('submit', event => { // login
 				event.preventDefault();
 				
-				console.log(tokenInput.value);
 				add_ele('iframe', document.body).contentWindow.localStorage.setItem('token', '"' + tokenInput.value + '"');
 				
-				setTimeout(() => global.pmd.url.assign('https://discord.com/channels/@me'), 1500);
+				setTimeout(() => _pm_.fills.url.assign('https://discord.com/channels/@me'), 1500);
 			});
 			
 			tokenLogin.addEventListener('click', () => (container.style.display = 'none', newContainer.style.display = 'block'));
