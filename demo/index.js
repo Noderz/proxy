@@ -57,3 +57,6 @@ server.get('/uptime', (req, res) => res.send(process.uptime()));
 
 server.use('/prox', gateway);
 server.use('/gateway', gateway);
+
+// console.log(rw.unurl('https://localhost:7080/serviceurl=hvtrs8%252F-wuw%252Cgmoelg.aoo%252Fqepvkcgupl%253Fhttps%253A%2525050F%252Fwww%27272Agoogle.com%2525050Fclient%27275F204%27273F%25250506at%27277%2540p%27273Di%272726biw%27273D1%27273%254020%25250506%272762ih%2525051D%27273%25403%27273C%25250506ei%27273D-RcnYJjwCJix5NoPj6mCkAw%2524rgf%253Fhttps%253A%2525050F%252Fwww%27272Agoogle.com%2525050F&ref=hvtrs8%252F-wuw%252Cgmoelg.aoo%252F'));
+// console.log('out: ' + rw.unurl(rw.url('/complete/search?q=testesttestt&cp=12&monke=true&client=gws-wiz&xssi=t&gs_ri=gws-wiz&hl=en&authuser=0&psi=kg0nYMm9D4jl5NoPn_qOkAw.1613172116460&dpr=1', { origin: 'https://localhost:7080' })));

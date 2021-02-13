@@ -89,10 +89,6 @@ var rewriter = require('./index.js'),
 			apply: (target, that, [ url, options ]) => new Promise((resolve, reject) => reject(new Error('A Service Worker has been blocked for this domain'))),
 		});
 		
-		win.document.write = new Proxy(win.document.write, {
-			apply: (target, that, args) => Reflect.apply(target, that, [ rw.html(args.join(''), pm.rw_data({ snippet: true })) ]),
-		});
-		
 		win.MutationObserver.prototype.observe = new Proxy(win.MutationObserver.prototype.observe, {
 			apply: (target, that, args) => Reflect.apply(target, that, args.map(pm.unnormal)),
 		});

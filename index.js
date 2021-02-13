@@ -175,7 +175,6 @@ module.exports = class {
 			url: {
 				proto: /^([^\/]+:)/,
 				host: /(:\/+)_(.*?)_/,
-				parsed: /^\/\w+-/,
 				ip: /^192\.168\.|^172\.16\.|^10\.0\.|^127\.0/,
 				whitespace: /\s+/g,
 			},
@@ -269,23 +268,19 @@ module.exports = class {
 		}
 	}
 	decode_params(url){
-		url = url + '';
-		
-		var start = url.indexOf(this.config.prefix) + this.config.prefix.length,
-			size = url.substr(start, url.indexOf('-', start + 1) - start),
-			start2 = start + size.length + 1,
-			out = new this.URL.searchParams(decodeURIComponent(url.substr(start2, start2 + parseInt(size, 16)))),
-			search_ind = url.indexOf('?');
-		
-		// osearch is to return original search value
-		if(search_ind != -1)out.osearch = url.substr(search_ind);
-		
-		return out;
-	}
-	encode_params(params){
-		var str = params.toString();
-		
-		return str.length.toString(16) + '-' + str;
+		try{
+			url = url + '';
+			
+			var start = url.indexOf(this.config.prefix) + this.config.prefix.length,
+				search_ind = url.indexOf('?'),
+				out = new this.URL.searchParams(decodeURIComponent(url.substr(start, search_ind == -1 ? url.length : search_ind)));
+			
+			if(search_ind != -1)out.osearch = url.substr(search_ind);
+			
+			return out;
+		}catch(err){
+			return new this.URL.searchParams();
+		}
 	}
 	decompress(req, res, callback){
 		var chunks = [];
@@ -437,13 +432,16 @@ module.exports = class {
 			}) ],
 			[ x => x ? (global.Blob = x) : global.Blob, value => new _proxy(value, {
 				construct(target, [ data, opts ]){
-					var decoded = opts && rw.mime.js.includes(opts.type) && Array.isArray(data) ? [ rw.js(rw.decode_blob(data), { url: _pm_.fills.url, origin: def.loc, base: _pm_.fills.url }) ] : data,
+					var decoded = opts && rw.mime.js.includes(opts.type) && Array.isArray(data) ? [ rw.js(rw.decode_blob(data), { url: fills.url, origin: def.loc }) ] : data,
 						blob = Reflect.construct(target, [ decoded, opts ]);
 					
 					_pm_.blob_store.set(blob, decoded[0]);
 					
 					return blob;
 				},
+			}) ],
+			[ x => x ? (global.document.write = x) : global.document.write, value => new _proxy(value, {
+				apply: (target, that, args) => Reflect.apply(target, that, [ rw.html(args.join(''), { origin: def.loc, url: fills.url }) ]),
 			}) ],
 			[ x => x ? (global.URL.createObjectURL = x) : global.URL.createObjectURL, value => new _proxy(value, {
 				apply(target, that, [ blob ]){
@@ -712,21 +710,22 @@ module.exports = class {
 		if(!url)return value;
 		
 		var out = url.href,
-			query = new this.URL.searchParams();
+			query = new this.URL.searchParams(),
+			decoded = this.decode_params(url); // for checking
 		
-		if(url.pathname.match(this.regex.url.parsed) && url.pathname.startsWith(this.config.prefix))return value;
+		if(decoded.has('url'))return value;
 		
 		// if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
 		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
 		
-		query.set('url', this.config.codec.encode(out, data));
+		query.set('url', encodeURIComponent(this.config.codec.encode(out, data)));
+		
 		if(data.type)query.set('type', data.type);
 		if(data.hasOwnProperty('route'))query.set('route', data.route);
 		
 		query.set('ref', this.config.codec.encode(data.base.href, data));
 		
-		var qd = encodeURIComponent(query + ''),
-			out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + this.encode_params(query);
+		var out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + query;
 		
 		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
 		
@@ -1029,6 +1028,7 @@ module.exports.codec = {
 					+ b64chs[u32 >> 6 & 63]
 					+ b64chs[u32 & 63];
 			}
+			
 			return pad ? asc.slice(0, pad - 3) + '==='.substr(pad) : asc;
 		},
 		decode(str){
