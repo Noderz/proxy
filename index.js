@@ -200,8 +200,6 @@ module.exports = class {
 						
 						queue.forEach(data => srv.send(data));
 						
-						srv.on('error', code => cli.close());
-						
 						srv.on('message', data => cli.send(data));
 						
 						srv.on('close', code => cli.close());
@@ -420,7 +418,7 @@ module.exports = class {
 		var global = new (_=>_).constructor('return this')(),
 			URL = rw.URL,
 			_proxy = function(target, desc){if(typeof target == 'function')return Object.defineProperties(function(...args){return new.target?desc.construct?desc.construct(target,args):new target(...args):desc.apply?desc.apply(target,this,args):target(...args)},Object.getOwnPropertyDescriptors(target));var n=[],i = o =>{var proto = Object.getPrototypeOf(o);if(typeof o!='object'||!proto)return o;n.push(...Object.getOwnPropertyNames(o));i(proto);return o};i(target);return Object.defineProperties({},Object.fromEntries(n.map(p=>[p,{get:_=>desc.ge?desc.get(target,p):Reflect.get(target,p),set:v=>desc.set?desc.set(target,p,v):Reflect.set(target,p,v)}])))},
-			_pm_ = global._pm_ || (global._pm_ = { backups: {}, blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
+			_pm_ = global._pm_ || (global._pm_ = { backups: [], blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
 			def = {
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
@@ -443,13 +441,12 @@ module.exports = class {
 					preventExtensions: t => Reflect.preventExtensions(tg),
 				}),
 				bind: (a, b) => Reflect.apply(def.restore(Function.prototype.bind)[0], a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(def.$backup(() => Function.prototype.toString), func, []) == 'function ' + func.name + '() { [native code] }',
+				is_native: func => typeof func == 'function' && Reflect.apply(def.$backup(Function.prototype, 'toString'), func, []) == 'function ' + func.name + '() { [native code] }',
 				storage_handler: {
 					get: (target, prop, receiver, ret) => prop == _pm_.original ? target : prop == _pm_.proxied ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
 					set: (target, prop, value) => (target.setItem(prop, value), true),
 				},
-				backup: {},
-				$backup: (func, val) => (val = func(), val[_pm_.original] || _pm_.backups[func.toString()] || (_pm_.backups[func.toString()] = val)),
+				$backup: (obj, prop, val) => ((val = _pm_.backups.findIndex(x => x[0] == obj && x[1] == prop), val != -1 && _pm_.backups[val][2]) || (val = obj[prop]) && val && val[_pm_.original] || (_pm_.backups.push([ obj, prop, obj[prop] ]))),
 				$prop: (obj, prop, orig) => (Object.defineProperty(obj, prop, { value: orig, enumerable: false, writable: true }), orig),
 				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(Object.prototype.hasOwnProperty)[0], obj, [ prop ]),
 				alt_prop: (obj, prop) => def.has_prop(obj, prop) ? obj[prop] : null,
@@ -468,8 +465,8 @@ module.exports = class {
 					},
 				},
 				// VERY annoying how natives get overwritten then screwed with
-				restore: (...args) => Reflect.apply(def.$backup(() => Array.prototype.map), args, [ arg => arg ? arg[_pm_.original] || arg : arg ]),
-				proxify: (...args) => Reflect.apply(def.$backup(() => Array.prototype.map), args, [ arg => arg ? arg[_pm_.proxied] || arg : arg ]),
+				restore: (...args) => Reflect.apply(def.$backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.original] || arg : arg ]),
+				proxify: (...args) => Reflect.apply(def.$backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.proxied] || arg : arg ]),
 				prefix: {
 					origin: prop => prop.split('@').splice(-1).join(''),
 					name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(rw.unurl(def.get_href(), { origin: def.loc })).hostname,
@@ -540,10 +537,10 @@ module.exports = class {
 			};
 		
 		// backup CRITICAL props
-		def.$backup(() => Function.prototype.toString, Function.prototype.toString);
-		def.$backup(() => Function.prototype.bind, Function.prototype.bind);
-		def.$backup(() => Object.prototype.hasOwnProperty, Object.prototype.hasOwnProperty);
-		def.$backup(() => Array.prototype.map, Array.prototype.map);
+		def.$backup(Function.prototype, 'toString');
+		def.$backup(Function.prototype, 'bind');
+		def.$backup(Object.prototype, 'hasOwnProperty');
+		def.$backup(Array.prototype, 'map');
 		
 		def.loc = def.restore(global.location)[0];
 		def.doc = def.restore(global.document)[0];
