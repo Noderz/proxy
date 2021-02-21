@@ -7,6 +7,9 @@
 		"type": "git",
 		"url": "git+https://github.com/sysce/proxy.git"
 	},
+	"scripts": {
+		"start": "node ./demo/index.js"
+	},
 	"bugs": {
 		"url": "https://github.com/sysce/proxy/issues"
 	},
