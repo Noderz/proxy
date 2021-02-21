@@ -1,4 +1,4 @@
-/*<--server_only*/
+/*server*/
 var fs = require('fs'),
 	dns = require('dns'),
 	zlib = require('zlib'),
@@ -21,7 +21,8 @@ var fs = require('fs'),
 		
 		if(filter.leftAnchored)return input.href.substring(0, filter.data.length) == filter.data;
 		
-		var parts = filter.data.split('*'), index = 0;
+		var parts = filter.data.split('*'),
+			index = 0;
 		
 		if(filter.data.match(/^[0-9a-z]/i) && input.hostname.endsWith(filter.data.split(' ').splice(-1)[0]))return true;
 		
@@ -30,10 +31,31 @@ var fs = require('fs'),
 
 adblock.parse(fs.readFileSync(path.join(__dirname, 'adblock.txt'), 'utf8'), filter_data);
 
-/*server_only-->*/
+/*end_server*/
 
 var URL = require('./url.js');
 
+/**
+* Rewriter
+* @param {Object} config
+* @param {Object} server - nodehttp/express server to run the proxy on, only on the serverside this is required
+* @param {Boolean} [config.adblock] - Determines if the adblock.txt file should be used for checking URLs
+* @param {Boolean} [config.ruffle] - Determines if ruffle.rs should be used for flash content
+* @param {Boolean} [config.ws] - Determines if websocket support should be added
+* @param {Object} [config.codec] - The codec to be used (rewriter.codec.plain, base64, xor)
+* @param {Boolean} [config.prefix] - The prefix to run the proxy on
+* @param {Boolean} [config.interface] - The network interface to request from
+* @param {Boolean} [config.timeout] - The maximum request timeout time
+* @param {Boolean} [config.title] - The title of the pages visited
+* @param {Object} [config.http_agent] - Agent to be used for http: / ws: requests
+* @param {Object} [config.https_agent] - Agent to be used for https: / wss: requests
+* @property {Object} mime - Contains mime data for categorizing mimes
+* @property {Object} attr - Contains attribute data for categorizing attributes and tags
+* @property {Object} attr_ent - Object.entries called on attr property
+* @property {Object} regex - Contains regexes used throughout the rewriter
+* @property {Object} config - Where the config argument is stored
+* @property {Object} URL - class extending URL with the `fullpath` property
+*/
 module.exports = class {
 	constructor(config){
 		this.config = Object.assign({
@@ -43,7 +65,7 @@ module.exports = class {
 			https_agent: module.browser ? null : new https.Agent({ rejectUnauthorized: false }),
 			codec: module.exports.codec.plain,
 			interface: null,
-			prefix: null,
+			prefix: '/',
 			ws: true, // websocket proxying
 			timeout: 30000, // max request timeout
 			title: 'Service',
@@ -57,7 +79,7 @@ module.exports = class {
 		
 		if(typeof this.config.codec == 'string')this.config.codec = module.exports.codec[this.config.codec];
 		
-		/*<--server_only*/if(this.config.server){
+		/*server*/if(this.config.server){
 			if(this.config.dns)dns.setServers(this.config.dns);
 			
 			this.config.server_ssl = this.config.server.ssl;
@@ -169,7 +191,7 @@ module.exports = class {
 					});
 				});
 			}
-		}/*server_only-->*/
+		}/*end_server*/
 		
 		this.dom = module.browser ? global : new jsdom();
 		
@@ -189,7 +211,7 @@ module.exports = class {
 				// work on getting import() function through
 				// (match, start, quote, url, end) 
 				// export_exp: /export\s*?\{[\s\S]*?;/g,
-				server_only: /\/\*<--server_only\*\/[\s\S]*?\/\*server_only-->\*\//g,
+				server_only: /\/\*server\*\/[\s\S]*?\/\*end_server\*\//g,
 				sourceurl: /#\s*?sourceURL/gi,
 			},
 			css: {
@@ -217,9 +239,9 @@ module.exports = class {
 			html: [ 'text/html' ],
 			xml: [ 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
 		};
-
+		
 		this.mime_ent = Object.entries(this.mime);
-
+		
 		this.attr = {
 			html: [ [ 'iframe' ], [ 'srcdoc' ] ],
 			css: [ '*', [ 'style' ] ],
@@ -234,7 +256,7 @@ module.exports = class {
 		
 		this.http_protocols = [ 'http:', 'https:' ];
 		
-		/*<--server_only*/if(!module.browser){
+		/*server*/if(!module.browser){
 			this._bundler = class {
 				constructor(modules, wrapper = [ '', '' ]){
 					this.modules = modules;
@@ -302,12 +324,479 @@ module.exports = class {
 			
 			this.bundle();
 			setInterval(this.bundle, 2000);
-		}else/*server_only-->*/{
+		}else/*end_server*/{
 			this.prw = this.config.prw
 			this.glm = this.config.glm;
 			this.preload = [ 'alert("how!")', Date.now() ];
 		}
 	}
+	/**
+	* Prefixes a URL and encodes it
+	* @param {String|URL|Request} - URL value
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @param {Object} [data.type] - The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
+	* @param {Object} [data.ws] - If the URL is a WebSocket
+	* @returns {String} Proxied URL
+	*/
+	url(value, data = {}){
+		if(data.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
+		
+		if(typeof value == 'undefined')return value;
+		
+		var oval = value;
+		
+		if(!data.origin)throw new TypeError('give origin');
+		
+		data.base = this.valid_url(data.base || this.unurl(data.origin));
+		
+		data.origin = this.valid_url(data.origin).origin || data.origin;
+		
+		if(module.browser && data.base.origin == 'null'){
+			var x = global.location.href;
+			
+			if(!x || !x.hostname)try{ x = global.parent.location.href }catch(err){}
+			
+			try{ x = new URL(x) }catch(err){};
+			
+			data.base = x;
+		}
+		
+		if(module.browser && value instanceof global.Request)value = value.url;
+		if(typeof value == 'object')value = value.hasOwnProperty('url') ? value.url : value + '';
+		
+		value = value; // .replace(this.regex.url.whitespace, '');
+		
+		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
+			var raw = global._pm_.url_store.get(value);
+			
+			if(raw)return (URL.createObjectURL[_pm_.original] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+		}
+		
+		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
+		
+		var url = this.valid_url(value, data.base);
+		
+		if(!url)return value;
+		
+		var out = url.href,
+			query = new this.URL.searchParams(),
+			decoded = this.decode_params(url); // for checking
+		
+		if(decoded.has('url'))return value;
+		
+		// if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
+		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
+		
+		query.set('url', encodeURIComponent(this.config.codec.encode(out, data)));
+		
+		if(data.type)query.set('type', data.type);
+		if(data.hasOwnProperty('route'))query.set('route', data.route);
+		
+		query.set('ref', this.config.codec.encode(data.base.href, data));
+		
+		var out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + query;
+		
+		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
+		
+		return out;
+	}
+	/**
+	* Attempts to decode a URL previously ran throw the URL handler
+	* @param {String} - URL value
+	* @returns {String} - Normal URL
+	*/
+	unurl(value, data = {}){;
+		var decoded = this.decode_params(value);
+		
+		if(!decoded.has('url'))return value;
+		
+		var out = this.config.codec.decode(decoded.get('url'), data),
+			search_ind = out.indexOf('?');
+		
+		if(decoded.osearch)out = out.substr(0, search_ind == -1 ? out.length : search_ind) + decoded.osearch;
+		
+		return out;
+	}
+	/**
+	* Scopes JS and adds in filler objects
+	* @param {String} value - JS code
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @returns {String}
+	*/
+	js(value, data = {}){
+		value = this.plain(value, data);
+		
+		if(value.startsWith('{/*pmrw'))return value;
+		
+		if(value.includes(`tructionHolder.style.display="block",instructions.innerHTML="<div style='color: rgba(255, 255, 255, 0.6)'>"+e+"</div><div style='margin-top:10px;font-size:20px;color:rgba(255,255,255,0.4)'>Make sure you are using the latest version of Chrome or Firef`))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
+		
+		var js_imports = [], js_exports = [], prws = [];
+		
+		if(data.rewrite != false)value = value
+		.replace(this.regex.sourcemap, '# undefined')
+		.replace(this.regex.js.prw_ind, match => (prws.push(match), '/*pmrwins' + (prws.length - 1) + '*/'))
+		.replace(this.regex.js.call_this, '$1rw_this(this)$2')
+		.replace(this.regex.js.eval, '(x=>eval(pm_eval(x)))')
+		.replace(this.regex.js.construct_this, 'new(rw_this(this))')
+		// move import statements
+		// .replace(this.regex.js.import_exp, (match, start, quote, url, end) => (js_imports.push(start + this.url(url, data.furl, data.url) + end), ''))
+		// .replace(this.regex.js.export_exp, match => (js_exports.push(match), ''))
+		;
+		
+		var id = this.checksum(value);
+		
+		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '/' + String.fromCharCode(8203) + '/') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
+		
+		return value;
+	}
+	/**
+	* Rewrites CSS urls and selectors
+	* @param {String} value - CSS code
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @returns {String}
+	*/
+	css(value, data = {}){
+		if(!value)return '';
+		
+		value = value.toString('utf8');
+		
+		[
+			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
+			[this.regex.sourcemap, '# undefined'],
+			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
+			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-pm' + name : name) + end ],
+		].forEach(([ reg, val ]) => value = value.replace(reg, val));
+		
+		return value;
+	}
+	/**
+	* Rewrites manifest JSON data, needs the data object since the URL handler is called
+	* @param {String} value - Manifest code
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @returns {String}
+	*/
+	manifest(value, data = {}){
+		var json;
+		
+		try{ json = JSON.parse(value) }catch(err){ return value };
+		
+		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src'].includes(key) ? this.url(val, data) : val);
+	}
+	/**
+	* Parses and modifies HTML, needs the data object since the URL handler is called
+	* @param {String} value - Manifest code
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Boolean} [data.snippet] - If the HTML code is a snippet and if it shouldn't have the rewriter scripts added
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @returns {String}
+	*/
+	html(value, data = {}){
+		value = this.plain(value, data);
+		
+		try{
+			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, 'text/html'),
+			charset = '<meta charset="ISO-8859-1">';
+		}catch(err){
+			console.error(err);
+			
+			return 'hacker!!!\ngot:\n' + err.message;
+		}
+		
+		document.querySelectorAll(module.browser ? '#pro-root *' : '*').forEach(node => {
+			switch((node.tagName || '').toLowerCase()){
+				case'meta':
+					
+					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
+					
+					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, data)));
+					
+					// node.remove();
+					
+					break;
+				case'title':
+					
+					node.remove();
+					
+					break;
+				case'link':
+					
+					if(node.rel && node.rel.includes('icon'))node.remove();
+					// else if(node.rel == 'manifest')node.href = this.url(node.href, { origin: data.url, base: data.base, type: 'manifest' });
+					
+					break;
+				case'script':
+					var type = node.getAttribute('type') || this.mime.js[0];
+					
+					// 3rd true indicates this is a global script
+					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, data);
+					
+					break;
+				case'style':
+					
+					node.innerHTML = this.css(node.innerHTML, data);
+					
+					break;
+				case'base':
+					
+					if(node.href)data.url = data.base = new URL(node.href, this.valid_url(data.url).href);
+					
+					node.remove();
+					
+					break;
+			}
+			
+			node.getAttributeNames().forEach(name => !name.startsWith('data-') && this.html_attr(node, name, data));
+		});
+		
+		if(!data.snippet)document.head.insertAdjacentHTML('afterbegin', `${charset}<title>${this.config.title}</title><link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'><script src=".${this.config.prefix}?html=${this.preload[1]}"></script>`, 'proxied');
+		
+		return this.html_serial(document);
+	}
+	/**
+	* Validates and parses attributes, needs data since multiple handlers are called
+	* @param {Node|Object} node - Object containing at least getAttribute and setAttribute
+	* @param {String} name - Name of the attribute
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	*/
+	html_attr(node, name, data){
+		var ovalue, value = node.rworig_getAttribute ? node.rworig_getAttribute(name) : node.getAttribute(name);
+		
+		ovalue = value;
+		
+		if(!value)return;
+		
+		value = (value + '').replace(this.regex.newline, '');
+		
+		var	tag = (node.tagName || '').toLowerCase(),
+			attr_type = this.attr_type(name, tag);
+		
+		if(attr_type == 'url')node.setAttribute('data-pm' + name, value);
+		
+		switch(attr_type){
+			case'url':
+				value = name == 'srcset' ?
+					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, data) + size)
+					: name == 'xlink:href' && value.startsWith('#')
+						? value
+						: this.url(value, { origin: data.origin, base: data.base, url: data.url, type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
+				break;
+			case'del':
+				return node.removeAttribute(name);
+				break;
+			case'css':
+				value = this.css(value, data);
+				break;
+			case'js':
+				value = 'prop_eval(' + this.wrap(module.exports.codec.base64.encode(unescape(encodeURIComponent(value, data)))) + ')';
+				break;
+			case'html':
+				value = this.html(value, { snippet: true, url: data.url, origin: data.origin });
+				break;
+		}
+		
+		node.setAttribute(name, value);
+	}
+	/**
+	* Soon to add removing the servers IP, mainly for converting values to strings when handling
+	* @param {String|Buffer} value - Data to convert to a string
+	* @param {Object} data - Standard object for all rewriter handlers
+	*/
+	plain(value, data){
+		if(!value)return '';
+		
+		value = value + '';
+		
+		// replace ip and stuff
+		
+		return value;
+	}
+	/**
+	* Decoding blobs
+	* @param {Blob}
+	* @returns {String}
+	*/
+	decode_blob(data){ // blob => string
+		var decoder = new TextDecoder();
+		
+		return data.map(chunk => {
+			if(typeof chunk == 'string')return chunk;
+			else return decoder.decode(chunk);
+		}).join('');
+	}
+	/**
+	* Determines the attribute type using the `attr_ent` property
+	* @param {String} name - Property name
+	* @param {String} [tag] - Element tag
+	* @returns {String}
+	*/
+	attr_type(name, tag){
+		return name.startsWith('on') ? 'js' : (this.attr_ent.find(x => (!tag || x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0];
+	}
+	/**
+	* Prepares headers to be sent to the client from a server
+	* @param {Object} - Headers
+	* @returns {Object}
+	*/
+	headers_decode(value, data = {}){
+		var out = {};
+		
+		for(var header in value){
+			var val = typeof value[header] == 'object' ? value[header].join('') : value[header];
+			
+			switch(header.toLowerCase()){
+				case'set-cookie':
+					
+					out[header] = this.cookie_encode(val, { origin: data.origin, url: data.url, base: data.base });
+					
+					break;
+				case'websocket-origin':
+					
+					out[header] = this.config.codec.decode(this.valid_url(data.url).searchParams.get('origin'), data) || this.valid_url(data.url).origin;
+					
+					break;
+				case'websocket-location':
+				case'location':
+					
+					out[header] = this.url(val, { origin: data.origin, url: data.url, base: data.base });
+					
+					break;
+				default:
+					
+					if(!header.match(this.regex.skip_header))out[header] = val;
+					
+					break;
+			}
+		};
+		
+		// soon?
+		// out['x-rwog'] = JSON.stringify(value);
+		
+		return out;
+	}
+	/**
+	* Prepares headers to be sent to the server from a client, calls URL handler so data object is needed
+	* @param {Object} - Headers
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @param {Object} [data.type] - The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
+	* @param {Object} [data.ws] - If the URL is a WebSocket
+	* @returns {Object}
+	*/
+	/*server*/headers_encode(value, data = {}){
+		// prepare headers to be sent to a request url (eg google.com)
+		
+		var out = {};
+		
+		for(var header in value){
+			var val = typeof value[header] == 'object' ? value[header].join('') : value[header];
+			
+			switch(header.toLowerCase()){
+				case'referrer':
+				case'referer':
+					
+					out[header] = data.origin.searchParams.has('ref') ? this.config.codec.decode(data.origin.searchParams.get('ref'), data) : this.valid_url(data.url).href;
+					
+					break;
+				case'cookie':
+					
+					out[header] = this.cookie_decode(val, data);
+					
+					break;
+				case'host':
+					
+					out[header] = this.valid_url(data.url).host;
+					
+					break;
+				case'sec-websocket-key': break;
+				case'origin':
+					
+					var url;
+
+					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
+					
+					out.Origin = url ? url.origin : this.valid_url(data.url).origin;
+					
+					break;
+				default:
+					
+					if(!header.match(this.regex.skip_header))out[header] = val;
+					
+					break;
+			}
+		}
+		
+		out['accept-encoding'] = 'gzip, deflate'; // , br
+		
+		out['upgrade-insecure-requests'] = '1';
+		
+		delete out['cache-control'];
+		
+		out.host = this.valid_url(data.url).host;
+		
+		return out;
+	}/*end_server*/
+	/**
+	* Prepares cookies to be sent to the client from a server, calls URL handler so 
+	* @param {String} value - Cookie header
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} data.url - Base URL (needed for hostname when adding suffix)
+	* @returns {Object}
+	*/
+	cookie_encode(value, data = {}){
+		return value.split(';').map(split => {
+			var split = (split + '').trim().split('=');
+			
+			if(split[0] == 'secure')return '';
+			else if(split[0] == 'domain')split[1] = data.origin.hostname;
+			else if(split[0] == 'path')split[1] = '/';
+			else if(!['expires', 'path', 'httponly', 'samesite'].includes(split[0]))split[0] += '@' + this.valid_url(data.url).hostname;
+			
+			
+			return split[0] + (split[1] ? '=' + split[1] + ';' : ';');
+		}).join(' ');
+	}
+	/**
+	* Prepares cookies to be sent to the server from a client, calls URL handler so 
+	* @param {String} value - Cookie header
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} data.url - Base URL (needed for hostname when adding suffix)
+	* @returns {Object}
+	*/
+	cookie_decode(value, data = {}){
+		return value.split(';').map(split => {
+			var split = (split + '').trim().split('='),
+				fn = split[0].split('@'),
+				origin = fn.splice(-1).join('');
+			
+			return fn && this.valid_url(data.url).hostname.includes(origin) ? fn[0] + '=' + split[1] + ';' : null;
+		}).filter(v => v).join(' ');
+	}
+	/**
+	* Decode params of URL, takes the prefix and then decodes a querystring
+	* @param {URL|String} URL to parse
+	* @returns {URLSearchParams}
+	*/
 	decode_params(url){
 		url = url + '';
 		
@@ -325,6 +814,12 @@ module.exports = class {
 		
 		return out;
 	}
+	/**
+	* Decompresses response data
+	* @param {Object} Client request
+	* @param {Object} Request response
+	* @param {Function} Callback
+	*/
 	decompress(req, res, callback){
 		var chunks = [];
 		
@@ -353,6 +848,12 @@ module.exports = class {
 		
 		res.on('data', chunk => chunks.push(chunk)).on('end', () => callback(Buffer.concat(chunks))).on('error', err => console.error(err) + callback(Buffer.concat(chunks)));
 	}
+	/**
+	* Validates a URL
+	* @param {URL|String} URL to parse
+	* @param {URL|String} [Base]
+	* @returns {Undefined|URL} Result, is undefined if an error occured
+	*/
 	valid_url(...args){
 		var out;
 		
@@ -360,6 +861,10 @@ module.exports = class {
 		
 		return out;
 	}
+	/**
+	* Returns a string version of the config`
+	* @returns {Object}
+	*/
 	str_conf(){
 		return JSON.stringify({
 			codec: this.config.codec.name,
@@ -375,6 +880,12 @@ module.exports = class {
 			glm: this.glm,
 		});
 	}
+	/**
+	* Globals, called in the client to set any global data or get the proper fills object
+	* @param {URL} Local URL incase the global object is not set
+	* @param {Object} Rewriter instance
+	* @returns {Object} Fills
+	*/
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
 			URL = rw.URL,
@@ -699,6 +1210,11 @@ module.exports = class {
 		
 		return fills;
 	}
+	/**
+	* Serializes a JSDOM or DOMParser object
+	* @param {Document} DOM
+	* @returns {String}
+	*/
 	html_serial(dom){
 		if(module.browser)return dom.querySelector('#pro-root').innerHTML;
 		
@@ -712,362 +1228,20 @@ module.exports = class {
 		
 		return out;
 	}
+	/**
+	* Wraps a string
+	* @param {String}
+	* @returns {String}
+	*/
 	wrap(str){
 		return JSON.stringify([ str ]).slice(1, -1);
 	}
-	hash(r,e=5381,t=r.length){for(;t;)e=33*e^r.charCodeAt(--t);return e>>>0}
-	url(value, data = {}){
-		if(data.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
-		
-		if(typeof value == 'undefined')return value;
-		
-		var oval = value;
-		
-		if(!data.origin)throw new TypeError('give origin');
-		
-		data.base = this.valid_url(data.base || this.unurl(data.origin));
-		
-		data.origin = this.valid_url(data.origin).origin || data.origin;
-		
-		if(module.browser && data.base.origin == 'null'){
-			var x = global.location.href;
-			
-			if(!x || !x.hostname)try{ x = global.parent.location.href }catch(err){}
-			
-			try{ x = new URL(x) }catch(err){};
-			
-			data.base = x;
-		}
-		
-		if(module.browser && value instanceof global.Request)value = value.url;
-		if(typeof value == 'object')value = value.hasOwnProperty('url') ? value.url : value + '';
-		
-		value = value; // .replace(this.regex.url.whitespace, '');
-		
-		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
-			var raw = global._pm_.url_store.get(value);
-			
-			if(raw)return (URL.createObjectURL[_pm_.original] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
-		}
-		
-		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
-		
-		var url = this.valid_url(value, data.base);
-		
-		if(!url)return value;
-		
-		var out = url.href,
-			query = new this.URL.searchParams(),
-			decoded = this.decode_params(url); // for checking
-		
-		if(decoded.has('url'))return value;
-		
-		// if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
-		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
-		
-		query.set('url', encodeURIComponent(this.config.codec.encode(out, data)));
-		
-		if(data.type)query.set('type', data.type);
-		if(data.hasOwnProperty('route'))query.set('route', data.route);
-		
-		query.set('ref', this.config.codec.encode(data.base.href, data));
-		
-		var out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + query;
-		
-		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
-		
-		return out;
-	}
-	unurl(value, data = {}){;
-		var decoded = this.decode_params(value);
-		
-		if(!decoded.has('url'))return value;
-		
-		var out = this.config.codec.decode(decoded.get('url'), data),
-			search_ind = out.indexOf('?');
-		
-		if(decoded.osearch)out = out.substr(0, search_ind == -1 ? out.length : search_ind) + decoded.osearch;
-		
-		return out;
-	}
-	headers_decode(value, data = {}){
-		var out = {};
-		
-		for(var header in value){
-			var val = typeof value[header] == 'object' ? value[header].join('') : value[header];
-			
-			switch(header.toLowerCase()){
-				case'set-cookie':
-					
-					out[header] = this.cookie_encode(val, { origin: data.origin, url: data.url, base: data.base });
-					
-					break;
-				case'websocket-origin':
-					
-					out[header] = this.config.codec.decode(this.valid_url(data.url).searchParams.get('origin'), data) || this.valid_url(data.url).origin;
-					
-					break;
-				case'websocket-location':
-				case'location':
-					
-					out[header] = this.url(val, { origin: data.origin, url: data.url, base: data.base });
-					
-					break;
-				default:
-					
-					if(!header.match(this.regex.skip_header))out[header] = val;
-					
-					break;
-			}
-		};
-		
-		// out['x-rwog'] = JSON.stringify(value);
-		
-		return out;
-	}
-	/*<--server_only*/headers_encode(value, data = {}){
-		// prepare headers to be sent to a request url (eg google.com)
-		
-		var out = {};
-		
-		for(var header in value){
-			var val = typeof value[header] == 'object' ? value[header].join('') : value[header];
-			
-			switch(header.toLowerCase()){
-				case'referrer':
-				case'referer':
-					
-					out[header] = data.origin.searchParams.has('ref') ? this.config.codec.decode(data.origin.searchParams.get('ref'), data) : this.valid_url(data.url).href;
-					
-					break;
-				case'cookie':
-					
-					out[header] = this.cookie_decode(val, data);
-					
-					break;
-				case'host':
-					
-					out[header] = this.valid_url(data.url).host;
-					
-					break;
-				case'sec-websocket-key': break;
-				case'origin':
-					
-					var url;
-
-					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
-					
-					out.Origin = url ? url.origin : this.valid_url(data.url).origin;
-					
-					break;
-				default:
-					
-					if(!header.match(this.regex.skip_header))out[header] = val;
-					
-					break;
-			}
-		}
-		
-		out['accept-encoding'] = 'gzip, deflate'; // , br
-		
-		out['upgrade-insecure-requests'] = '1';
-		
-		delete out['cache-control'];
-		
-		out.host = this.valid_url(data.url).host;
-		
-		return out;
-	}/*server_only-->*/
-	cookie_encode(value, data = {}){
-		return value.split(';').map(split => {
-			var split = (split + '').trim().split('=');
-			
-			if(split[0] == 'secure')return '';
-			else if(split[0] == 'domain')split[1] = data.origin.hostname;
-			else if(split[0] == 'path')split[1] = '/';
-			else if(!['expires', 'path', 'httponly', 'samesite'].includes(split[0]))split[0] += '@' + this.valid_url(data.url).hostname;
-			
-			
-			return split[0] + (split[1] ? '=' + split[1] + ';' : ';');
-		}).join(' ');
-	}
-	cookie_decode(value, data = {}){
-		return value.split(';').map(split => {
-			var split = (split + '').trim().split('='),
-				fn = split[0].split('@'),
-				origin = fn.splice(-1).join('');
-			
-			return fn && this.valid_url(data.url).hostname.includes(origin) ? fn[0] + '=' + split[1] + ';' : null;
-		}).filter(v => v).join(' ');
-	}
-	/* methods */
-	js(value, data = {}){
-		value = this.plain(value, data);
-		
-		if(value.startsWith('{/*pmrw'))return value;
-		
-		if(value.includes(`tructionHolder.style.display="block",instructions.innerHTML="<div style='color: rgba(255, 255, 255, 0.6)'>"+e+"</div><div style='margin-top:10px;font-size:20px;color:rgba(255,255,255,0.4)'>Make sure you are using the latest version of Chrome or Firef`))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
-		
-		var js_imports = [], js_exports = [], prws = [];
-		
-		if(data.rewrite != false)value = value
-		.replace(this.regex.sourcemap, '# undefined')
-		.replace(this.regex.js.prw_ind, match => (prws.push(match), '/*pmrwins' + (prws.length - 1) + '*/'))
-		.replace(this.regex.js.call_this, '$1rw_this(this)$2')
-		.replace(this.regex.js.eval, '(x=>eval(pm_eval(x)))')
-		.replace(this.regex.js.construct_this, 'new(rw_this(this))')
-		// move import statements
-		// .replace(this.regex.js.import_exp, (match, start, quote, url, end) => (js_imports.push(start + this.url(url, data.furl, data.url) + end), ''))
-		// .replace(this.regex.js.export_exp, match => (js_exports.push(match), ''))
-		;
-		
-		var id = this.hash(value);
-		
-		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '/' + String.fromCharCode(8203) + '/') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
-		
-		return value;
-	}
-	attr_type(name, tag){
-		return name.startsWith('on') ? 'js' : (this.attr_ent.find(x => (!tag || x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0];
-	}
-	css(value, data = {}){
-		if(!value)return '';
-		
-		value = value.toString('utf8');
-		
-		[
-			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
-			[this.regex.sourcemap, '# undefined'],
-			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
-			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-pm' + name : name) + end ],
-		].forEach(([ reg, val ]) => value = value.replace(reg, val));
-		
-		return value;
-	}
-	manifest(value, data = {}){
-		var json;
-		
-		try{ json = JSON.parse(value) }catch(err){ return value };
-		
-		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src'].includes(key) ? this.url(val, data) : val);
-	}
-	html(value, data = {}){
-		value = this.plain(value, data);
-		
-		try{
-			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, 'text/html'),
-			charset = '<meta charset="ISO-8859-1">';
-		}catch(err){
-			console.error(err);
-			
-			return 'hacker!!!\ngot:\n' + err.message;
-		}
-		
-		document.querySelectorAll(module.browser ? '#pro-root *' : '*').forEach(node => {
-			switch((node.tagName || '').toLowerCase()){
-				case'meta':
-					
-					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
-					
-					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, data)));
-					
-					// node.remove();
-					
-					break;
-				case'title':
-					
-					node.remove();
-					
-					break;
-				case'link':
-					
-					if(node.rel && node.rel.includes('icon'))node.remove();
-					// else if(node.rel == 'manifest')node.href = this.url(node.href, { origin: data.url, base: data.base, type: 'manifest' });
-					
-					break;
-				case'script':
-					var type = node.getAttribute('type') || this.mime.js[0];
-					
-					// 3rd true indicates this is a global script
-					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, data);
-					
-					break;
-				case'style':
-					
-					node.innerHTML = this.css(node.innerHTML, data);
-					
-					break;
-				case'base':
-					
-					if(node.href)data.url = data.base = new URL(node.href, this.valid_url(data.url).href);
-					
-					node.remove();
-					
-					break;
-			}
-			
-			node.getAttributeNames().forEach(name => !name.startsWith('data-') && this.html_attr(node, name, data));
-		});
-		
-		if(!data.snippet)document.head.insertAdjacentHTML('afterbegin', `${charset}<title>${this.config.title}</title><link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'><script src=".${this.config.prefix}?html=${this.preload[1]}"></script>`, 'proxied');
-		
-		return this.html_serial(document);
-	}
-	html_attr(node, name, data){
-		var ovalue, value = node.rworig_getAttribute ? node.rworig_getAttribute(name) : node.getAttribute(name);
-		
-		ovalue = value;
-		
-		if(!value)return;
-		
-		value = (value + '').replace(this.regex.newline, '');
-		
-		var	tag = (node.tagName || '').toLowerCase(),
-			attr_type = this.attr_type(name, tag);
-		
-		if(attr_type == 'url')node.setAttribute('data-pm' + name, value);
-		
-		switch(attr_type){
-			case'url':
-				value = name == 'srcset' ?
-					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, data) + size)
-					: name == 'xlink:href' && value.startsWith('#')
-						? value
-						: this.url(value, { origin: data.origin, base: data.base, url: data.url, type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
-				break;
-			case'del':
-				return node.removeAttribute(name);
-				break;
-			case'css':
-				value = this.css(value, data);
-				break;
-			case'js':
-				value = 'prop_eval(' + this.wrap(module.exports.codec.base64.encode(unescape(encodeURIComponent(value, data)))) + ')';
-				break;
-			case'html':
-				value = this.html(value, { snippet: true, url: data.url, origin: data.origin });
-				break;
-		}
-		
-		node.setAttribute(name, value);
-	}
-	plain(value, data){
-		if(!value)return '';
-		
-		value = value + '';
-		
-		// replace ip and stuff
-		
-		return value;
-	}
-	decode_blob(data){ // blob => string
-		var decoder = new TextDecoder();
-		
-		return data.map(chunk => {
-			if(typeof chunk == 'string')return chunk;
-			else return decoder.decode(chunk);
-		}).join('');
-	}
+	/**
+	* Runs a checksum on a string
+	* @param {String}
+	* @returns {Number}
+	*/
+	checksum(r,e=5381,t=r.length){for(;t;)e=33*e^r.charCodeAt(--t);return e>>>0}
 }
 
 module.exports.codec = {

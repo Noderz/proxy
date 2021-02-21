@@ -26,5 +26,8 @@
 	"license": "GPL-3.0",
 	"dependencies": {
 		"sys-nodehttp": "^1.2.5"
+	},
+	"devDependencies": {
+		"documentation": "^13.1.1"
 	}
 }
