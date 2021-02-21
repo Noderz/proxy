@@ -53,15 +53,19 @@ Any occurance of `this` is changed to call the global rw_this function with the 
 
 An example:
 
-Call the rewriter and parse ```
-if(window.location == this.location)alert('Everything checks out!');
-``` as JS
-
+Call the rewriter and parse:
 ```
+if(window.location == this.location)alert('Everything checks out!');
+```
+
+Expected result:
+
+```js
 {let fills=<bundled code>,window=fills.this,document=fills.document;if(window.location == rw_this(this).location)alert('Everything checks out!');
 //# sourceURL=anonymous:1
 }
 ```
+
 `this` in the input code is defined as `window`, the `window` has a proxied version that will also determine if any properties are proxied and give a result.
 
 `this` => `fills.this`
