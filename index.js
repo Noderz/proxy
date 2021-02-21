@@ -76,6 +76,8 @@ var URL = require('./url.js');
 module.exports = class {
 	constructor(config){
 		this.config = Object.assign({
+			adblock: true,
+			ruffle: false,
 			http_agent: module.browser ? null : new http.Agent({}),
 			https_agent: module.browser ? null : new https.Agent({ rejectUnauthorized: false }),
 			codec: module.exports.codec.plain,
@@ -221,7 +223,7 @@ module.exports = class {
 				prw_ins: /\/\*pmrwins(\d+)\*\//g,
 				window_assignment: /(?<![a-z])window(?![a-z])\s*?=(?!=)this/gi,
 				call_this: /(\?\s*?)this(\s*?:)|()()(?<![a-zA-Z_\d'"$])this(?![:a-zA-Z_\d'"$])/g,
-				construct_this: /new pm_this\(this\)/g,
+				construct_this: /new rw_this\(this\)/g,
 				// hooking function is more practical but cant do
 				eval: /(?<![a-zA-Z0-9_$.,])(?:window\.|this)?eval(?![a-zA-Z0-9_$])/g,
 				// import_exp: /(?<!['"])(import\s+[{"'`*](?!\*)[\s\S]*?from\s*?(["']))([\s\S]*?)(\2;)/g,
@@ -575,7 +577,7 @@ module.exports = class {
 		def.$prop(global, _pm_.proxied, fills.this);
 		if(def.doc)def.$prop(def.doc, _pm_.proxied, fills.doc);
 		
-		global.pm_this = that => def.proxify(that)[0];
+		global.rw_this = that => def.proxify(that)[0];
 		// get scope => eval inside of scope
 		global.pm_eval = js => '(()=>' + rw.js('return eval(' + rw.wrap(rw.js(js, { url: fills.url, origin: def.loc, base: fills.url, scope: false })) + ')', def.rw_data({ rewrite: false })) + ')()';
 		
@@ -945,9 +947,9 @@ module.exports = class {
 		if(data.rewrite != false)value = value
 		.replace(this.regex.sourcemap, '# undefined')
 		.replace(this.regex.js.prw_ind, match => (prws.push(match), '/*pmrwins' + (prws.length - 1) + '*/'))
-		.replace(this.regex.js.call_this, '$1pm_this(this)$2')
+		.replace(this.regex.js.call_this, '$1rw_this(this)$2')
 		.replace(this.regex.js.eval, '(x=>eval(pm_eval(x)))')
-		.replace(this.regex.js.construct_this, 'new(pm_this(this))')
+		.replace(this.regex.js.construct_this, 'new(rw_this(this))')
 		// move import statements
 		// .replace(this.regex.js.import_exp, (match, start, quote, url, end) => (js_imports.push(start + this.url(url, data.furl, data.url) + end), ''))
 		// .replace(this.regex.js.export_exp, match => (js_exports.push(match), ''))
