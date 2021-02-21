@@ -76,7 +76,7 @@ Expected result:
 
 A part of getting down full HTML rewriting is also making sure any dynamically made elements are rewritten.
 
-[Getters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get and [setters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set) are used for properties on the `Node.prototype` object for such as but not limited to:
+[Getters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get) and [setters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set) are used for properties on the `Node.prototype` object for such as but not limited to:
 
 - `outerHTML`
 - `innerHTML`
@@ -86,7 +86,7 @@ A part of getting down full HTML rewriting is also making sure any dynamically m
 - `insertAdjacentHTML`
 - `nonce`
 - `integrity`
-+ every attribute that is rewritten in the HTML side of things.
++ every attribute that is rewritten in the HTML side of things
 
 Any property/function that inserts raw html code that is not rewritten is ran through the rewriters HTML handler.
 Properties are handled by the rewriters HTML property handler (for consistency)
