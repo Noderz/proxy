@@ -101,10 +101,10 @@ A bundled version of [JSDOM](https://www.npmjs.com/package/jsdom) is used to ach
 
 Each property is iterated and in the rewriter a huge array containing information for determining the type of attribute being worked with is used ( this includes tag and name).
 
-If the type is a URL then the resulting value is determined by the rewriters URL handler
-If the type is JS then the resulting value is determined by the rewriters JS handler along with being wrapped for encoding
-If the type is CSS then the resulting value is determined by the rewriters CSS handler along
+- If the type is a URL then the resulting value is determined by the rewriters URL handler
+- If the type is JS then the resulting value is determined by the rewriters JS handler along with being wrapped for encoding
+- If the type is CSS then the resulting value is determined by the rewriters CSS handler along
 
 ### Manifest:
 
-A basic JSON.stringify checking if the key is `src` or `key` or `start_url` and if it is then the rewriters URL handler is used to determine the result
+A basic JSON.stringify checking if the key is `src` or `key` or `start_url` and if it is then the rewriters URL handler is used to determine the result.
