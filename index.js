@@ -30,45 +30,6 @@ var fs = require('fs'),
 
 adblock.parse(fs.readFileSync(path.join(__dirname, 'adblock.txt'), 'utf8'), filter_data);
 
-function indexOfFilter(input, filter, startingPos) {
-	if (filter.length > input.href.length) {
-		return -1;
-	}
-
-	var filterParts = filter.split('^');
-	var index = startingPos;
-	var beginIndex = -1;
-	var prefixedSeparatorChar = false;
-
-	for (var f = 0; f < filterParts.length; f++) {
-		if (filterParts[f] === '') {
-			prefixedSeparatorChar = true;
-			continue;
-		}
-
-		index = input.href.indexOf(filterParts[f], index);
-		
-		if(index == -1)return -1;
-		
-		if(beginIndex == -1)beginIndex = index;
-		
-		if (prefixedSeparatorChar) {
-			if (':?/=^'.indexOf(input.href[index - 1]) === -1) {
-				return -1;
-			}
-		}
-		// If we are in an in between filterPart
-		if (f + 1 < filterParts.length &&
-			// and we have some chars left in the input past the last filter match
-			input.href.length > index + filterParts[f].length) {
-			if(':?/=^'.indexOf(input.href[index + filterParts[f].length]) == -1)return -1;
-		}
-
-		prefixedSeparatorChar = false;
-	}
-	
-	return beginIndex;
-}
 /*server_only-->*/
 
 var URL = require('./url.js');

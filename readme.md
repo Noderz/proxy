@@ -34,6 +34,8 @@ var nodehttp = require('sys-nodehttp'),
 		title: 'Service',
 		// http_agent: ..,
 		// https_agent: ..,
+		// ruffle: ..,
+		// adblock: ..,
 	});
 
 // [0000] server listening on http://localhost:7080/
