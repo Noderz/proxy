@@ -511,6 +511,12 @@ module.exports = class {
 					get origin(){
 						return fills.url.origin;
 					},
+					get parent(){
+						try{ global.parent.location; return def.restore(global.parent)[0] }catch(err){ return fills.this }
+					},
+					get top(){
+						try{ global.top.location; return def.restore(global.top)[0] }catch(err){ return fills.this }
+					},
 				},
 				doc_binds: {
 					get URL(){
@@ -988,8 +994,14 @@ module.exports = class {
 	html(value, data = {}){
 		value = this.plain(value, data);
 		
-		var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, 'text/html'),
+		try{
+			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, 'text/html'),
 			charset = '<meta charset="ISO-8859-1">';
+		}catch(err){
+			console.error(err);
+			
+			return 'hacker!!!\ngot:\n' + err.message;
+		}
 		
 		document.querySelectorAll(module.browser ? '#pro-root *' : '*').forEach(node => {
 			switch((node.tagName || '').toLowerCase()){
