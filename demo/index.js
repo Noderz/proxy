@@ -59,7 +59,3 @@ server.get('/uptime', (req, res) => res.send(process.uptime()));
 
 server.use('/prox', gateway);
 server.use('/gateway', gateway);
-
-// console.log(rw.unurl('https://localhost:7080/serviceurl=hvtrs8%252F-gsl%252Ctuivcj.vv-gsl%21opieil%253Dvwklkgjt&route=false&ref=hvtrs8%2F-wuw%2Ctuivcj.vv-
-
-console.log(rw.unurl('https://localhost:7080/serviceurl=hvtrs8%252F-jwsvbwind%252Cn%257Bc1.adl.fieivanoaecnqpccgs%252Ccmm-CK%252F42-WgbEL%252Cjqol&route=false&ref=hvtrs8%2F-1t1%2Clml-'));

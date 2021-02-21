@@ -446,6 +446,7 @@ module.exports = class {
 					get: (target, prop, receiver, ret) => prop == _pm_.original ? target : prop == _pm_.proxied ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
 					set: (target, prop, value) => (target.setItem(prop, value), true),
 				},
+				proxied: [],
 				$backup: (obj, prop, val) => ((val = _pm_.backups.findIndex(x => x[0] == obj && x[1] == prop), val != -1 && _pm_.backups[val][2]) || (val = obj[prop]) && val && val[_pm_.original] || (_pm_.backups.push([ obj, prop, obj[prop] ]))),
 				$prop: (obj, prop, orig) => (Object.defineProperty(obj, prop, { value: orig, enumerable: false, writable: true }), orig),
 				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(Object.prototype.hasOwnProperty)[0], obj, [ prop ]),
@@ -582,7 +583,8 @@ module.exports = class {
 		
 		global.rw_this = that => def.proxify(that)[0];
 		// get scope => eval inside of scope
-		global.pm_eval = js => '(()=>' + rw.js('return eval(' + rw.wrap(rw.js(js, { url: fills.url, origin: def.loc, base: fills.url, scope: false })) + ')', def.rw_data({ rewrite: false })) + ')()';
+		global.pm_eval = js => '(()=>' + rw.js('return eval(' + rw.wrap(rw.js(js, def.rw_data({ scope: false }))) + ')', def.rw_data({ rewrite: false })) + ')()';
+		global.prop_eval = data => new Function('return(_=>' + rw.js(atob(decodeURIComponent(data)), def.rw_data()) + ')()')();
 		
 		[
 			[ x => x ? (global.Function = x) : global.Function, value => new _proxy(value, {
@@ -717,7 +719,7 @@ module.exports = class {
 			[ x => x ? (global.Document.prototype.querySelectorAll = x) : global.Document.prototype.querySelectorAll, value => new _proxy(value, {
 				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ rw.css(query, def.rw_data()) ]),
 			}) ],
-			[ x => x ? (def.doc.getComputedStyle = x) : def.doc.getComputedStyle, value => new _proxy(value, {
+			[ x => x ? (global.getComputedStyle = x) : global.getComputedStyle, value => new _proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, args.map(def.restore).map(x => x instanceof global.Element ? x : def.doc.body)),
 			}) ],
 			[ x => x ? (Node.prototype.contains = x) : Node.prototype.contains, value => new _proxy(value, {
@@ -1079,7 +1081,7 @@ module.exports = class {
 				value = this.css(value, data);
 				break;
 			case'js':
-				value = 'window.eval(atob(decodeURIComponent("' + module.exports.codec.base64.encode(unescape(encodeURIComponent(value, data))) + '")))';
+				value = 'prop_eval(' + this.wrap(module.exports.codec.base64.encode(unescape(encodeURIComponent(value, data)))) + ')';
 				break;
 			case'html':
 				value = this.html(value, { snippet: true, url: data.url, origin: data.origin });

@@ -72,6 +72,25 @@ Expected result:
 
 `this.location` => `fills.url`
 
+#### HTML rewriting:
+
+A part of getting down full HTML rewriting is also making sure any dynamically made elements are rewritten.
+
+[Getters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/get and [setters](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Functions/set) are used for properties on the `Node.prototype` object for such as but not limited to:
+
+- `outerHTML`
+- `innerHTML`
+- `getAttribute`
+- `setAttribute`
+- `setAttributeNS`
+- `insertAdjacentHTML`
+- `nonce`
+- `integrity`
++ every attribute that is rewritten in the HTML side of things.
+
+Any property/function that inserts raw html code that is not rewritten is ran through the rewriters HTML handler.
+Properties are handled by the rewriters HTML property handler (for consistency)
+
 ### CSS:
 
 A basic regex to locate all `url()` blocks is used and the rewriters URL handler is called with the value and meta for the page
