@@ -18,19 +18,25 @@ npm i sys-proxy
 
 ### Demo:
 
+See the [demo folder](demo/) for more usage examples
+
 ```
 var nodehttp = require('sys-nodehttp'),
 	rewriter = require('sys-proxy'),
-		port: config.port,
-		address: config.address,
+	server = new nodehttp.server({
+		port: 7080,
 		static: path.join(__dirname, 'public'),
-		ssl: config.ssl ? {
-			key: fs.readFileSync(path.join(__dirname, 'ssl.key'), 'utf8'),
-			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
-		} : false,
-		adblock: true,
-		ruffle: true,
 	}),
+	rw = new rewriter({
+		prefix: '/service',
+		codec: rewriter.codec.xor,
+		server: server,
+		title: 'Service',
+		// http_agent: ..,
+		// https_agent: ..,
+	});
+
+// [0000] server listening on http://localhost:7080/
 ```
 
 ## How it works:
