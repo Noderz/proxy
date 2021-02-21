@@ -1,17 +1,6 @@
 'use strict';
 
-if(!global._pm_)global._pm_ = {};
-if(!global._pm_.fills)global._pm_.fills = {};
-if(!global._pm_.hooked)global._pm_.hooked = Symbol();
-
-Object.assign(global._pm_, {
-	hooked: Symbol(),
-	fills: {},
-	blob_store: new Map(),
-	url_store: new Map(),
-	hooked: 'pm.hooked',
-	prw: prw,
-}, global._pm_);
+if(!global._pm_)global._pm_ = { backups: {}, blob_store: new Map(), url_store: new Map(), proxied: 'pm.proxied', overwrite: 'pm.overwrite', original: 'pm.original' };
 
 var rewriter = require('./index.js'),
 	rw = new rewriter(rewrite_conf),
@@ -29,112 +18,27 @@ var rewriter = require('./index.js'),
 		},
 		rw_data: data => Object.assign({ url: pm.url, base: pm.url, origin: pm.get_href() }, data ? data : {}),
 		init: global.__pm_init__,
-		odoc: document,
 		url: global._pm_.url || (global._pm_.url = new URL(global._pm_.url || rw.unurl(global.location.href, { origin: global.location }))),
-		/* restore args */
-		unnormal: arg => (arg && arg[_pm_.hooked]) ? arg[_pm_.hooked] : arg,
-		normal(args){ // normalize arguments
-			return args.map(arg => !arg ? arg : arg.pm_doc
-				? document
-				: arg.pm_win
-					? window
-					: arg
-			);
+		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : (arg && arg[_pm_.hooked]) ? arg[_pm_.hooked] : arg,
+		frame(win){
+			try{
+				if(win && !win._pm_){
+					win.__pm_init__ = pm.init;
+					
+					new win.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
+					
+					return win._pm_.fills.this;
+				}
+			}catch(err){
+				console.error(err);
+				return { fills: { this: {} } };
+			}
 		},
 	},
 	hook = win => {
-		if(win[_pm_.hooked])return;
-		
-		win[_pm_.hooked] = true;
-		
-		win.XMLHttpRequest.prototype.open = new Proxy(win.XMLHttpRequest.prototype.open, {
-			apply: (target, that, [ method, url, ...args ]) => Reflect.apply(target, that, [ method, rw.url(url, pm.rw_data({ route: false })), ...args ]),
-		});
-		
-		win.Navigator.prototype.sendBeacon = new Proxy(win.Navigator.prototype.sendBeacon, {
-			apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ rw.url(url, pm.rw_data()), data ]),
-		});
-
-		win.open = new Proxy(win.open, {
-			apply: (target, that, [ url, name, features ]) => Reflect.apply(target, that, [ rw.url(url, pm.rw_data()), name, features ]),
-		});
-		
-		win.postMessage = new Proxy(win.postMessage, {
-			apply: (target, that, [ message, origin, transfer ]) => Reflect.apply(target, win, [ [ 'proxied', origin, message ], pm.get_href(), transfer ]),
-		});
-		
-		// workers and websockets
-
-		win.WebSocket = new Proxy(win.WebSocket, {
-			construct(target, [ url, opts ]){
-				var ws = Reflect.construct(target, [ rw.url(url, pm.rw_data({ base: _pm_.url, ws: true })), opts ]);
-				
-				ws.addEventListener('message', event => event.data == 'srv-alive' && event.stopImmediatePropagation() + ws.send('srv-alive') || event.data == 'srv-open' && event.stopImmediatePropagation() + ws.dispatchEvent(new Event('open', { srcElement: ws, target: ws })));
-				
-				ws.addEventListener('open', event => event.stopImmediatePropagation(), { once: true });
-				
-				return ws;
-			},
-		});
-
-		win.Worker = new Proxy(win.Worker, {
-			construct: (target, [ url, options ]) => Reflect.construct(target, [ rw.url(url, { origin: location, base: pm.url, type: 'js' }), options ]),
-		});
-		
-		win.FontFace = new Proxy(win.FontFace, {
-			construct: (target, [ family, source, descriptors ]) => Reflect.construct(target, [ family, rw.url(source, { origin: location, base: pm.url, type: 'font' }), descriptors ]),
-		});
-		
-		win.ServiceWorkerContainer.prototype.register = new Proxy(win.ServiceWorkerContainer.prototype.register, {
-			apply: (target, that, [ url, options ]) => new Promise((resolve, reject) => reject(new Error('A Service Worker has been blocked for this domain'))),
-		});
-		
-		win.MutationObserver.prototype.observe = new Proxy(win.MutationObserver.prototype.observe, {
-			apply: (target, that, args) => Reflect.apply(target, that, args.map(pm.unnormal)),
-		});
-		
-		win.getComputedStyle = new Proxy(win.getComputedStyle, {
-			apply: (target, that, args) => Reflect.apply(target, win, args.map(pm.unnormal).map(x => x instanceof Element ? x : document.body)),
-		});
-		
-		win.document.createTreeWalker = new Proxy(win.document.createTreeWalker, {
-			apply: (target, that, args) => Reflect.apply(target, that, args.map(pm.unnormal)),
-		});
-		
 		var url_protos = [win.Image,win.HTMLObjectElement,win.StyleSheet,win.SVGUseElement,win.SVGTextPathElement,win.SVGScriptElement,win.SVGPatternElement,win.SVGMPathElement,win.SVGImageElement,win.SVGGradientElement,win.SVGFilterElement,win.SVGFEImageElement,win.SVGAElement,win.HTMLTrackElement,win.HTMLSourceElement,win.HTMLScriptElement,win.HTMLMediaElement,win.HTMLLinkElement,win.HTMLImageElement,win.HTMLIFrameElement,win.HTMLFrameElement,win.HTMLEmbedElement,win.HTMLBaseElement,win.HTMLAreaElement,win.HTMLAnchorElement,win.CSSImportRule];
 		
-		window.innerHeight = 938;
-		window.innerWidth = 1920;
-		window.outerWidth = 1936;
-		window.outerHeight = 1056;
-		
-		[ [ Screen, org => ({
-			get availLeft(){
-				return 0;
-			},
-			get availTop(){
-				return 0;
-			},
-			get availWidth(){
-				return 1920;
-			},
-			get availHeight(){
-				return 1056;
-			},
-			get width(){
-				return 1920;
-			},
-			get height(){
-				return 1080;
-			},
-			get pixelDepth(){
-				return 24;
-			}
-		}) ], [ MouseEvent, org => ({
-			initMouseEvent(...args){
-				return Reflect.apply(org.initMouseEvent.value, this, pm.normal(args));
-			},
-		}) ], [ win.Event, org => ({
+		[ [ win.Event, org => ({
 			get target(){
 				return pm.unnormal(Reflect.apply(org.target.get, this, []));
 			},
@@ -152,10 +56,10 @@ var rewriter = require('./index.js'),
 				return rw.cookie_decode(Reflect.apply(org.cookie.get, this, []), pm.rw_data());
 			},
 			set cookie(v){
-				return Reflect.apply(org.cookie.set, pm.odoc, [ rw.cookie_encode(v, pm.rw_data()) ]);
+				return Reflect.apply(org.cookie.set, global.document, [ rw.cookie_encode(v, pm.rw_data()) ]);
 			},
 			get defaultView(){
-				return global._pm_.fills.win;
+				return global._pm_.fills.this;
 			},
 			get referrer(){
 				return rw.unurl(Reflect.apply(org.referrer.get, this, []));
@@ -192,19 +96,7 @@ var rewriter = require('./index.js'),
 		})], [ win.HTMLIFrameElement, org => ({
 			set contentWindow(v){return v},
 			get contentWindow(){
-				var wind = Reflect.apply(org.contentWindow.get, this, []);
-				
-				if(!wind)return;
-				
-				if(!wind._pm_ || !wind._pm_.fills || !wind._pm_.fills.win){
-					(wind._pm_ || (wind._pm_ = {})).prw = _pm_.prw;
-					wind._pm_.url = new URL(rw.unurl(wind.location.href || location.href));
-					wind.__pm_init__ = pm.init;
-					
-					new wind.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
-				}
-				
-				return wind._pm_.fills.win;
+				return pm.frame(Reflect.apply(org.contentWindow.get, this, []));
 			},
 			get srcdoc(){
 				return Reflect.apply(org.srcdoc.get, this, []);
@@ -227,27 +119,27 @@ var rewriter = require('./index.js'),
 			get ownerDocument(){
 				return global._pm_.fills.doc;
 			},
-		}), ], [ win.Element, org => ({
+		}) ], [ win.Element, org => ({
 			get innerHTML(){
 				return Reflect.apply(org.innerHTML.get, this, []);
 			},
 			set innerHTML(v){
-				return Reflect.apply(org.innerHTML.set, this, [ rw.html(v, { snippet: true, origin: location, url: pm.url, base: pm.url }) ]);
+				return Reflect.apply(org.innerHTML.set, this, [ rw.html(v, pm.rw_data({ snippet: true })) ]);
 			},
 			get outerHTML(){
 				return Reflect.apply(org.outerHTML.get, this, []);
 			},
 			set outerHTML(v){
-				return Reflect.apply(org.outerHTML.set, this, [ rw.html(v, { snippet: true, origin: location, url: pm.url, base: pm.url }) ]);
+				return Reflect.apply(org.outerHTML.set, this, [ rw.html(v, pm.rw_data({ snippet: true })) ]);
 			},
 		}) ], [ win.Node, org => ({
-			/*appendChild(node){
+			appendChild(node){
 				var ret = Reflect.apply(org.appendChild.value, this, [ node ]);
 				
-				if(node && node.nodeName == 'IFRAME')node.contentWindow ? pm.iframe(node) : node.addEventListener('load', () => pm.iframe(node));
+				if(node && node.nodeName == 'IFRAME')node.contentWindow ? pm.frame(node.contentWindow) : node.addEventListener('load', () => pm.frame(node.contentWindow));
 				
 				return ret;
-			},*/
+			},
 		})], [ win.MessageEvent, org => ({
 			get origin(){
 				var data = Reflect.apply(org.data.get, this, []);
@@ -257,7 +149,7 @@ var rewriter = require('./index.js'),
 			get source(){
 				var source = Reflect.apply(org.source.get, this, []);
 				
-				if(source && source._pm_)source = source._pm_.fills.win;
+				if(source && source._pm_)source = source._pm_.fills.this;
 				
 				return source;
 			},
@@ -304,7 +196,7 @@ var rewriter = require('./index.js'),
 							return v;
 						},
 						setAttribute: (attr, val) => {
-							return Reflect.apply(org[attr].set, this, [ val ]);
+							return attr.startsWith('data-') ? (this.dataset[attr.substr(5)] = val) : Reflect.apply(org[attr].set, this, [ val ]);
 						},
 						removeAttribute: (attr, val) => {
 							return Reflect.apply(org.removeAttribute.value, this, [ attr, val ]);
@@ -336,7 +228,6 @@ var rewriter = require('./index.js'),
 			},
 		});
 		
-			
 		delete win.navigator.getUserMedia;
 		delete win.navigator.mozGetUserMedia;
 		delete win.navigator.webkitGetUserMedia;
@@ -349,12 +240,6 @@ var rewriter = require('./index.js'),
 		delete win.RTCSessionDescription;
 		delete win.mozRTCSessionDescription;
 		delete win.webkitRTCSessionDescription;
-		
-		try{ Object.defineProperties(win.navigator, {
-			doNotTrack: { get: _ => true },
-			language: { get: _ => 'en-US' },
-			languages: { get: _ => ['en-US', 'en'] },
-		}) }catch(err){}
 	};
 
 hook(window);
@@ -363,7 +248,11 @@ rw.globals(pm.url.href, rw);
 if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 	var add_ele = (node_name, parent, attributes) => Object.assign(parent.appendChild(document.createElement(node_name)), attributes),
 		ready = container => {
-			var tokenLogin = add_ele('button', container, {
+			var login_text = [...document.querySelectorAll('[class*="contents"]')].find(node => node.textContent == 'Login');
+			
+			if(!login_text)return;
+			
+			var tokenLogin = Object.assign(login_text.parentNode.parentNode.insertBefore(document.createElement('button'), login_text.parentNode.nextSibling), {
 					className: 'marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONNq77ONN',
 					type: 'button',
 					innerHTML: '<div class="contents-18-Yxp">Token Login</div>',
@@ -371,40 +260,14 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 				newContainer = add_ele('form', container.parentNode, {
 					style: 'display:none',
 					className: 'mainLoginContainer-1ddwnR',
-				}),
-				loginBlock = add_ele('div', newContainer, {
-					className: 'block-egJnc0 marginTop20-3TxNs6',
-				}),
-				tokenInput = add_ele('input', add_ele('div', add_ele('div', loginBlock, {
-					className: 'marginBottom20-32qID7',
-					innerHTML: '<div class="colorStandard-2KCXvj size14-e6ZScH h5-18_1nd title-3sZWYQ defaultMarginh5-2mL-bP">Token</div>'
-				}), { className: 'inputWrapper-31_8H8' }), {
-					className: 'inputDefault-_djjkz input-cIJ7To',
-					name: 'token',
-					type: 'password',
-					placeholder: '',
-					autocomplete: 'on',
-					spellcheck: false,
-				}),
-				tokenSubmit = add_ele('button', loginBlock, {
-					type: 'submit',
-					className: 'marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONN',
-				}),
-				tokenSubmitLabel = add_ele('div', tokenSubmit, {
-					className: 'contents-18-Yxp',
-					innerHTML: 'Login',
-				}),
-				backToLogin = add_ele('button', newContainer, {
-					type: 'button',
-					className: 'marginTop8-1DLZ1n linkButton-wzh5kV button-38aScr lookLink-9FtZy- colorBrand-3pXr91 sizeMin-1mJd1x grow-q77ONN',
+					innerHTML: '<div class="block-egJnc0 marginTop20-3TxNs6"><div class="colorStandard-2KCXvj size14-e6ZScH h5-18_1nd title-3sZWYQ defaultMarginh5-2mL-bP">Token</div><input class="inputDefault-_djjkz input-cIJ7To" name="token" type="password" autocomplete="on" required></input><button class="marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONN"><div class="contents-18-Yxp">Login</div></button></div>',
 				});
 			
-			add_ele('div', backToLogin, {
-				className: 'contents-18-Yxp',
-				innerHTML: 'Return to login',
-			});
-			
-			backToLogin.addEventListener('click', () => (newContainer.style.display = 'none', container.style.display = 'block'));
+			add_ele('button', newContainer, {
+				innerHTML: '<div class="contents-18-Yxp">Return to login</div>',
+				type: 'button',
+				className: 'marginTop8-1DLZ1n linkButton-wzh5kV button-38aScr lookLink-9FtZy- colorBrand-3pXr91 sizeMin-1mJd1x grow-q77ONN',
+			}).addEventListener('click', () => (newContainer.style.display = 'none', container.style.display = 'block'))
 			
 			newContainer.addEventListener('submit', event => { // login
 				event.preventDefault();
@@ -416,7 +279,6 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 			
 			tokenLogin.addEventListener('click', () => (container.style.display = 'none', newContainer.style.display = 'block'));
 			
-			container.appendChild(document.querySelector('.marginTop4-2BNfKC'));
 			container.appendChild(document.querySelector('.marginTop4-2BNfKC'));
 		},
 		inv = setInterval(() => document.querySelectorAll('.mainLoginContainer-1ddwnR').forEach(node => ready(node) + clearInterval(inv)), 100);

@@ -1,6 +1,6 @@
 {
 	"main": "index.js",
 	"dependencies": {
-		"sys-nodehttp": "^1.2.4"
+		"sys-nodehttp": "^1.2.5"
 	}
 }
