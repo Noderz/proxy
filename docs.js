@@ -10,7 +10,7 @@ console.log('starting..');
 
 doc.build([ file ], { shallow: true }).then(data => doc.formats.md(data, { markdownToc: true })).then(docs => fs.promises.writeFile(path.join(__dirname, 'readme.md'), `# SystemYA Proxy
 
-<a href="https://www.npmjs.com/package/sys-proxy">![Download](https://img.shields.io/npm/dw/sys-proxyp)</a>
+<a href="https://www.npmjs.com/package/sys-proxy">![Download](https://img.shields.io/npm/dw/sys-proxy?style=for-the-badge)</a>
 
 ## Quickstart:
 
